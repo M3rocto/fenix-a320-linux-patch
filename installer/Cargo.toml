@@ -1,0 +1,30 @@
+[package]
+name = "fenix-patch"
+version = "0.1.0-preview.6"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Fenix A320 Linux Patch installer: MSFS 2020/2024 on Steam, MSFS 2024 in Flightdeck"
+publish = false
+
+[lib]
+name = "fenix_patch"
+path = "src/lib.rs"
+
+[dependencies]
+quick-xml = "0.42.0"
+regex = "1.13.1"
+rustix = { version = "1.1.4", features = ["event", "fs", "process", "rand", "system"] }
+serde = { version = "1.0.229", default-features = false, features = ["std"] }
+serde_json = { version = "1.0.151", features = ["arbitrary_precision", "preserve_order"] }
+sha2 = "0.11.1"
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "deny"
