@@ -1,10 +1,11 @@
 # Steam editions of MSFS 2020 and MSFS 2024
 
 The standalone installer can patch the Steam editions directly; Flightdeck is
-not required. **This path has not been run with a real Steam simulator yet.**
-Its installer, Proton tool and Windows profile handling were verified in a
-reproduced Steam library with the pinned Proton; the Fenix displays themselves
-were verified only in Flightdeck's MSFS 2024. MSFS 2020 with Fenix is untested.
+not required. **The maintainer has not run this path with a real Steam
+simulator.** One user confirmed MSFS 2024 with working Fenix displays on the
+`cachyos-11` base. The installer, Proton tool and Windows profile handling were
+verified in a reproduced Steam library with the pinned Proton, and the patched
+runner starts inside Steam's runtime container. MSFS 2020 with Fenix is untested.
 
 ## Why a separate Proton
 
@@ -36,7 +37,19 @@ example the earlier `cachyos-10.0-sunset-slr`.
    *Force the use of a specific Steam Play compatibility tool* and choose
    **Proton Fenix A320 (…)**. `status` reports whether Steam has this selection.
 4. Continue as usual: run the official Fenix Installer, open Fenix and sign in,
-   then apply CPU displays + Legacy readouts.
+   then apply the settings. This sets CPU displays and starts Fenix with the
+   simulator. Fenix may create the file for the Legacy FCU readouts only once
+   the aircraft has been loaded; the setup then asks you to load it once and
+   apply the setting again.
+
+## Update
+
+Run `./install.sh` from the new release and choose **Update patch**, or
+`./install.sh install --steam msfs2024`. Close the simulator and Fenix first.
+The overlay in the *Proton Fenix A320* tool is replaced; the Windows profile,
+Fenix, its sign-in and settings are not touched, and Restore still returns the
+profile from before the first installation. When MSFS 2020 and 2024 share the
+tool, update both: the second one only records the new version.
 
 ```sh
 ./install.sh targets
@@ -88,5 +101,5 @@ another Proton for the simulator in Steam afterwards.
   native Wayland driver is not started either; X11/Xwayland uses the patched driver.
 * Verifying the simulator's files in Steam does not affect the profile. Deleting
   the simulator's compatibility data in Steam removes the patched profile.
-* Updating a patched Steam profile from an older patch release is not
-  implemented yet; restore and install again.
+* preview.5 linked a library that Steam's runtime container does not have, so
+  the simulator exited right after starting. Update to preview.6 or later.

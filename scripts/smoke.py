@@ -4,6 +4,7 @@
 import argparse
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -15,9 +16,46 @@ sys.path.insert(0, str(ROOT / "tests"))
 from x11_window_check import check_host_windows
 
 
+# Present in the Steam Linux Runtime 3 (sniper) and 4 containers. The cachyos-10
+# base links libgcc statically, so its overlay needs this one library more.
+RUNTIME_LIBRARIES = {"libgcc_s.so.1"}
+
+
+def needed(path):
+    output = subprocess.run(["readelf", "-d", str(path)], check=True, stdout=subprocess.PIPE, text=True).stdout
+    return set(re.findall(r"\(NEEDED\)\s+Shared library: \[([^\]]+)\]", output))
+
+
+def check_libraries(original, payload, names):
+    """A host library the build happened to link is absent from Steam's container."""
+    for name in names:
+        if "/x86_64-unix/" in name or "/bin/" in name:
+            extra = needed(payload / name) - needed(original / name) - RUNTIME_LIBRARIES
+            if extra:
+                raise ValueError("%s needs %s, which the runner it replaces does not" % (name, ", ".join(sorted(extra))))
+
+
+def check_container(runtime, runner, work):
+    """Start a Windows process as Steam does: inside the runtime container, which has only its own libraries."""
+    env = {key: value for key, value in os.environ.items() if key not in ("DISPLAY", "WAYLAND_DISPLAY")}
+    env.update(WINEPREFIX=str(work / "container-prefix"), WINEDEBUG="-all",
+               WINEDLLOVERRIDES="winemenubuilder.exe=d;mscoree,mshtml=")
+    launch = [str(runtime.resolve(strict=True) / "run"), "--"]
+    try:
+        result = subprocess.run([*launch, str(core.wine_binary(runner)), "cmd.exe", "/c", "echo", "container start OK"],
+                                env=env, cwd=work, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=300)
+        print(result.stdout, flush=True)
+        if result.returncode or "container start OK" not in result.stdout:
+            raise ValueError("The patched runner does not start inside " + runtime.name)
+    finally:
+        subprocess.run([*launch, str(runner / "files/bin/wineserver"), "-k"], env=env, cwd=work, check=False, timeout=60)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--runner", required=True, type=Path)
+    parser.add_argument("--steam-runtime", type=Path,
+                        help="SteamLinuxRuntime directory the Proton requires; also starts the runner inside its container")
     parser.add_argument("--variant", help="Exact Proton overlay from bundle.json; omitted for Xodus")
     parser.add_argument("--work", type=Path, default=ROOT / "build/smoke")
     parser.add_argument("--cache", type=Path, default=ROOT / "build/downloads")
@@ -34,10 +72,13 @@ def main():
     payload = ROOT / "payload"
     if args.variant:
         payload /= "variants/" + args.variant
+    check_libraries(original, payload, lock["files"])
     for name in lock["files"]:
         target = runner / name
         target.unlink()
         shutil.copy2(payload / name, target)
+    if args.steam_runtime:
+        check_container(args.steam_runtime, runner, work)
     prefix = work / "prefix"
     env = core.wine_env(prefix, runner)
     env["WINEDLLOVERRIDES"] = "winemenubuilder.exe=d;mscoree,mshtml="

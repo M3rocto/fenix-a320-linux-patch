@@ -21,7 +21,9 @@ Use a fresh `--build-dir`; existing build trees are never overwritten. `--prepar
 without compiling. The build verifies both source archives, populates the
 xgameruntime submodule, generates spec/Vulkan headers from the included XML,
 and configures Wine with `--enable-win64 --disable-tests --enable-silent-rules
---without-ffmpeg`. It builds the eleven targets listed in `scripts/build.py` and
+--without-ffmpeg --without-unwind`. Without the last option `configure` links
+`ntdll.so` against the build host's libunwind, which the pinned runners and the
+Steam Linux Runtime containers do not have. It builds the eleven targets listed in `scripts/build.py` and
 the independent MIT window guard, geometry setup and MCDU refresh helpers. Debug sections are stripped from release files.
 Compiler prefix maps replace local checkout paths in both Unix and Windows
 modules with `/usr/src/fenix-a320-linux-patch`.
@@ -43,10 +45,22 @@ before packaging a release:
 python3 scripts/build-proton.py experimental-11 --build-dir build/experimental --record-build
 python3 scripts/build-proton.py cachyos-10 --build-dir build/cachyos --record-build
 python3 scripts/build-proton.py cachyos-11 --build-dir build/cachyos-11 --record-build
-python3 scripts/smoke.py --variant experimental-11 --runner /path/to/Proton-Experimental --work build/experimental-smoke
-python3 scripts/smoke.py --variant cachyos-10 --runner /path/to/Proton-CachyOS --work build/cachyos-smoke
-python3 scripts/smoke.py --variant cachyos-11 --runner /path/to/proton-cachyos-11.0-20261005-slr-x86_64 --work build/cachyos-11-smoke
+python3 scripts/smoke.py --variant experimental-11 --runner /path/to/Proton-Experimental --work build/experimental-smoke --steam-runtime /path/to/SteamLinuxRuntime_4
+python3 scripts/smoke.py --variant cachyos-10 --runner /path/to/Proton-CachyOS --work build/cachyos-smoke --steam-runtime /path/to/SteamLinuxRuntime_sniper
+python3 scripts/smoke.py --variant cachyos-11 --runner /path/to/proton-cachyos-11.0-20261005-slr-x86_64 --work build/cachyos-11-smoke --steam-runtime /path/to/SteamLinuxRuntime_4
 ```
+
+Steam starts a Proton inside the runtime named by `require_tool_appid` in its
+`toolmanifest.vdf` (1628350 is sniper, 4183110 is Steam Linux Runtime 4). That
+container has only its own libraries, so a module that loads on the host can
+still fail there. `--steam-runtime` starts a Windows process with the patched
+runner inside the container; the smoke check also refuses an overlay module that
+needs a library its unmodified counterpart does not. The runtimes are free
+Steam tools and need no simulator licence.
+
+The Windows modules carry a link timestamp and checksum, so a rebuild without
+source changes differs in a few header bytes. Keep the published files in that
+case and record only modules whose code changed.
 
 `cachyos-11` is the default base of the Steam installation. Its port combines
 the Wine 11 changes of `experimental-11` with the Direct2D changes of

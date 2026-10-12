@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import urllib.request
 
-from build import ROOT, TARGETS, extract, sha
+from build import CONFIGURE, ROOT, TARGETS, extract, sha
 
 
 def main():
@@ -61,8 +61,7 @@ def main():
     output = build / "objects"
     output.mkdir()
     flags = "-O2 -ffile-prefix-map=" + str(build) + "=/usr/src/fenix-proton"
-    run([str(source / "configure"), "--enable-win64", "--disable-tests", "--enable-silent-rules",
-         "--without-ffmpeg", "CFLAGS=" + flags, "CROSSCFLAGS=" + flags], output)
+    run([str(source / "configure"), *CONFIGURE, "CFLAGS=" + flags, "CROSSCFLAGS=" + flags], output)
     run(["make", "depend"], output)
     run(["make", "-j" + str(args.jobs), *TARGETS], output)
     hashes = {}

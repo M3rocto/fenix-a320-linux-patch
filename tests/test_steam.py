@@ -205,6 +205,9 @@ class SteamTests(unittest.TestCase):
     def test_configure_registers_autostart_in_the_matching_simulator_folder(self):
         steam.install(self.item, self.bundle)
         self.put(self.prefix / core.PROGRAM / "Fenix.exe", "MZ")
+        with self.assertRaisesRegex(core.PatchError, "Start Fenix once and sign in"):
+            steam.configure(self.item)
+        self.assertFalse(core.read_json(self.item.marker)["configured"])
         self.put(self.prefix / core.CONFIG / "fenixConfig.xml", "<config><displayMode>GPU</displayMode></config>")
         self.put(self.prefix / core.CONFIG / "persistancy.xml", "<state/>")
         steam.configure(self.item)
@@ -212,6 +215,7 @@ class SteamTests(unittest.TestCase):
         self.assertEqual(entry.findtext("Path"), r"C:\Program Files\FenixSim A320\deps\FenixBootstrapper.exe")
         self.assertEqual(ET.parse(self.prefix / core.CONFIG / "fenixConfig.xml").getroot().findtext("displayMode"), "CPU")
         self.assertTrue(core.read_json(self.item.marker)["configured"])
+        self.assertTrue(core.read_json(self.item.marker)["readouts"])
         status = steam.snapshot(self.item)
         self.assertTrue(status["installed"] and status["fenix_installed"])
         self.assertFalse(status["tool_selected"])
@@ -248,6 +252,108 @@ class SteamTests(unittest.TestCase):
         self.assertIn("Properties → Compatibility", messages[-1])
         self.assertEqual(steam.selected_tool(self.item), "Proton-Fenix-A320-fixture")
 
+    def release(self):
+        """A later release of the same overlay with one changed file."""
+        entry = self.lock["variants"]["fixture"]
+        entry["previous_releases"] = {self.lock["version"]: {"files": dict(entry["files"])}}
+        self.lock["version"] = "fixture-next"
+        name = "files/bin/wineserver"
+        self.put(self.bundle / "payload/variants/fixture" / name, "newer " + name)
+        entry["files"][name] = core.digest(self.bundle / "payload/variants/fixture" / name)
+        self.put(self.bundle / "bundle.json", json.dumps(self.lock))
+
+    def test_update_replaces_the_overlay_and_keeps_the_profile(self):
+        steam.install(self.item, self.bundle)
+        self.put(self.prefix / core.PROGRAM / "Fenix.exe", "MZ")
+        self.put(self.prefix / core.CONFIG / "fenixConfig.xml", "<config/>")
+        self.put(self.prefix / core.CONFIG / "persistancy.xml", "<state/>")
+        steam.configure(self.item)
+        self.put(self.root / "config/config.vdf", CONFIG)
+        steam.select_tool(self.item)
+        target = targets.Steam(self.item)
+        self.assertTrue(guide.overview(target)["complete"])
+        before = core.read_json(self.item.marker)
+        self.release()
+        self.assertTrue(steam.snapshot(self.item)["update_available"])
+        view = guide.overview(target)
+        self.assertEqual((view["current"], view["steps"][0]["button"]), ("install", "Update patch"))
+        self.assertIn("fixture-next", view["steps"][0]["text"])
+        with self.assertRaisesRegex(core.PatchError, "Update it to fixture-next first"):
+            steam.configure(self.item)
+        # A tool that is not the installed release is never overwritten.
+        original = (self.tool / "files/bin/wine").read_text()
+        self.put(self.tool / "files/bin/wine", "tampered")
+        with self.assertRaisesRegex(core.PatchError, "differs from the supported build"):
+            steam.install(self.item, self.bundle)
+        self.assertEqual(core.read_json(self.item.marker), before)
+        self.assertEqual((self.tool / "files/bin/wineserver").read_text(), "new files/bin/wineserver")
+        self.put(self.tool / "files/bin/wine", original)
+        messages = []
+        guide.perform(target, "install", self.bundle, messages.append)
+        self.assertIn("Patch updated", messages[-1])
+        self.assertEqual((self.tool / "files/bin/wineserver").read_text(), "newer files/bin/wineserver")
+        self.assertEqual(steam.tool_state(self.tool), {"format": 1, "state": "ready", "variant": "fixture", "version": "fixture-next"})
+        state = core.read_json(self.item.marker)
+        self.assertEqual({**state, "version": "fixture"}, {**before, "updated_from": "fixture"})
+        self.assertEqual(state["version"], "fixture-next")
+        # No new profile, no second .NET setup, and the settings stay applied.
+        self.assertEqual(len(self.setups), 1)
+        self.assertTrue((self.prefix / core.PROGRAM / "Fenix.exe").is_file())
+        self.assertTrue((self.item.state / state["previous"] / "pfx/system.reg").is_file())
+        view = guide.overview(target)
+        self.assertTrue(view["complete"] and not view["update"])
+        steam.configure(self.item)
+        messages = []
+        steam.install(self.item, self.bundle, messages.append)
+        self.assertEqual(messages, ["This patch version is already installed."])
+
+    def test_update_of_a_shared_tool_reaches_both_simulators(self):
+        self.put(self.library / "steamapps/appmanifest_1250410.acf", "manifest")
+        other = steam.Target("msfs2020", self.root, self.library)
+        (other.prefix / "drive_c/windows/system32").mkdir(parents=True)
+        self.put(other.prefix / "system.reg", "2020 registry")
+        steam.install(self.item, self.bundle)
+        steam.install(other, self.bundle)
+        self.release()
+        # The tool is replaced for both, so the other simulator must be closed as well.
+        def idle(prefix):
+            if Path(prefix) == other.prefix:
+                raise core.PatchError("Close MSFS 2020")
+        with patch.object(core, "ensure_idle", side_effect=idle):
+            with self.assertRaisesRegex(core.PatchError, "Close MSFS 2020"):
+                steam.install(self.item, self.bundle)
+        self.assertEqual(steam.tool_state(self.tool)["version"], "fixture")
+        steam.install(self.item, self.bundle)
+        self.assertEqual((self.tool / "files/bin/wineserver").read_text(), "newer files/bin/wineserver")
+        # The other simulator now runs the new tool; its own record follows with its update.
+        self.assertTrue(steam.snapshot(other)["update_available"])
+        with self.assertRaisesRegex(core.PatchError, "Update it to fixture-next first"):
+            steam.configure(other)
+        steam.install(other, self.bundle)
+        self.assertEqual(core.read_json(other.marker)["version"], "fixture-next")
+        steam.verify_installed(self.item, core.read_json(self.item.marker))
+        steam.verify_installed(other, core.read_json(other.marker))
+        self.assertEqual(len(self.setups), 2)
+
+    def test_update_finishes_after_an_interruption_and_rejects_unknown_releases(self):
+        steam.install(self.item, self.bundle)
+        self.release()
+        # Interrupted while the tool was being rewritten: one file new, the marker says so.
+        name = "files/bin/wineserver"
+        (self.tool / name).write_text((self.bundle / "payload/variants/fixture" / name).read_text())
+        core.write_json(self.tool / steam.TOOL_MARKER, {**steam.tool_state(self.tool), "state": "updating", "version": "fixture-next"})
+        with self.assertRaisesRegex(core.PatchError, "Update it to fixture-next first"):
+            steam.windows_app(self.item)
+        steam.install(self.item, self.bundle)
+        self.assertEqual(core.read_json(self.item.marker)["version"], "fixture-next")
+        self.assertEqual(steam.tool_state(self.tool)["state"], "ready")
+        core.write_json(self.item.marker, {**core.read_json(self.item.marker), "version": "ancient"})
+        self.assertFalse(steam.snapshot(self.item)["update_available"])
+        with self.assertRaisesRegex(core.PatchError, "Restore it before reinstalling"):
+            steam.install(self.item, self.bundle)
+        with self.assertRaisesRegex(core.PatchError, "not supported by the current installer"):
+            steam.configure(self.item)
+
     def test_guide_leads_through_the_steps_in_order(self):
         target = targets.Steam(self.item)
         self.put(self.root / "config/config.vdf", CONFIG)
@@ -264,11 +370,24 @@ class SteamTests(unittest.TestCase):
             guide.perform(target, "installer", self.bundle, messages.append)
         self.put(self.prefix / core.PROGRAM / "Fenix.exe", "MZ")
         self.assertEqual(current()[0], "open")
+        # Signing in creates fenixConfig.xml. persistancy.xml only follows
+        # once the aircraft has been loaded, which needs the next step first.
         self.put(self.prefix / core.CONFIG / "fenixConfig.xml", "<config/>")
-        self.put(self.prefix / core.CONFIG / "persistancy.xml", "<state/>")
         self.assertEqual(current()[0], "configure")
         guide.perform(target, "configure", self.bundle, messages.append)
+        self.assertIn("load the aircraft once", messages[-1])
+        self.assertEqual(current(), ("readouts", ["install", "select", "installer", "open", "configure"]))
+        self.assertTrue((self.settings / "exe.xml").is_file())
         view = guide.overview(target)
+        self.assertFalse(view["complete"])
+        self.assertIn("from Steam", view["steps"][-1]["text"])
+        guide.perform(target, "readouts", self.bundle, messages.append)
+        self.assertEqual(current()[0], "readouts")
+        self.put(self.prefix / core.CONFIG / "persistancy.xml", "<state/>")
+        guide.perform(target, "readouts", self.bundle, messages.append)
+        self.assertEqual(ET.parse(self.prefix / core.CONFIG / "persistancy.xml").getroot().findtext("fcuReadoutsType"), "0")
+        view = guide.overview(target)
+        self.assertNotIn("readouts", [step["id"] for step in view["steps"]])
         self.assertTrue(view["complete"] and view["can_restore"])
         self.assertIn("from Steam", view["finish"])
         core.write_json(self.item.marker, {**core.read_json(self.item.marker), "state": "committing"})

@@ -51,6 +51,8 @@ with Fenix is untested. See [Steam details and limits](docs/steam.md).
 5. Choose **Open Fenix**. Sign in and activate your purchased aircraft normally,
    then close Fenix and its helpers.
 6. Choose **Apply settings** (CPU displays + Legacy readouts). Launch MSFS through Flightdeck.
+   If Fenix has not created its readout settings yet, the setup asks you to
+   load the aircraft once and apply the setting again.
 
 Flightdeck's **Add-ons → Fenix A320** panel provides the same workflow without
 opening a terminal. It downloads a pinned, checksummed patch release. Login and
@@ -92,8 +94,9 @@ geometry dependency, copies the existing runner's fonts and graphics dependencie
 and installs the compatibility overlay after the staging Wine session exits. It retains the
 original runner, profile and launch scripts. An interrupted installation has a
 recovery journal. Repeating an already completed installation verifies its files.
-Running `install` from preview.5 also updates verified preview.1–preview.4 installations,
-retaining installed aircraft, settings and the original restore point. Flightdeck
+Running `install` from preview.6 also updates verified preview.1–preview.5 installations,
+retaining installed aircraft, settings and the original restore point. On Steam it
+replaces the overlay of a preview.5 installation in place. Flightdeck
 performs that update before opening Fenix applications when needed.
 
 `restore` restores the profile from before the patch and retains the newer

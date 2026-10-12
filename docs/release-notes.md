@@ -1,3 +1,48 @@
+# 0.1.0-preview.6 — 12 October 2026
+
+Fixes the Steam start failure of preview.5. In every overlay exactly one file
+changes, `ntdll.so`; all other modules and helpers are the preview.5 files.
+Verified preview.5 installations are updated in place, on Steam and in
+Flightdeck, without reinstalling Fenix.
+
+* Build the patched `ntdll.so` without libunwind. On the build host, Wine's
+  `configure` found libunwind and linked `libunwind.so.8`, which neither the
+  unmodified runners nor Steam Linux Runtime 3 and 4 provide. Started from
+  Steam, the simulator therefore exited after about a second with `could not
+  load ntdll.so: libunwind.so.8`. All previews since preview.1 were affected;
+  outside the container the host library hid it. The module now needs
+  `libgcc_s.so.1` and `libc.so.6`, like the runners it replaces.
+  ([#3](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/3))
+* Update an installed Steam release in place: **Update patch** in the guided
+  setup, or `./install.sh install --steam msfs2024`, replaces the overlay in the
+  *Proton Fenix A320* tool. The Windows profile, Fenix, its sign-in and
+  settings stay as they are. A tool shared by MSFS 2020 and 2024 is updated
+  once; both simulators have to be closed.
+* The guided setup no longer waits at **Open Fenix and sign in** for
+  `persistancy.xml`. **Apply settings** writes CPU rendering and the autostart
+  entry as soon as `fenixConfig.xml` exists. When Fenix has not created
+  `persistancy.xml` yet, a further step asks to load the aircraft once and then
+  sets the Legacy FCU readouts, instead of reporting an error.
+* The guided setup offers an available update for Flightdeck runtimes as well.
+* `scripts/smoke.py` fails when an overlay module needs a library its runner
+  does not, and with `--steam-runtime` starts a Windows process with the
+  patched runner inside the Steam Linux Runtime container.
+
+Checked for this release: the preview.5 `cachyos-11` module fails inside Steam
+Linux Runtime 4 with the reported message and the new one starts a Windows
+process there; `cachyos-10` does the same in Steam Linux Runtime 3 (sniper).
+The regression probes pass again for the Xodus, `cachyos-10` and `cachyos-11`
+overlays. The pinned Proton Experimental build is no longer distributed by
+Steam; its overlay was probed on a runner assembled from that build's untouched
+files and the overlay. A rebuild of the Windows modules differs from preview.5
+only in the PE timestamp and checksum, so the published files are kept.
+
+The Steam path was confirmed by one user with MSFS 2024, the `cachyos-11` base
+and preview.5 plus a manually added libunwind. **The maintainer has still not
+run a real Steam simulator**; MSFS 2020 with Fenix is untested. Whether Fenix
+creates `persistancy.xml` only on the first aircraft load is taken from that
+report.
+
 # 0.1.0-preview.5 — 10 October 2026
 
 One release for Steam and Flightdeck. The Flightdeck overlay (Xodus Wine) and

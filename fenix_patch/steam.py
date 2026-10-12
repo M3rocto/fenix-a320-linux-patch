@@ -393,9 +393,50 @@ def require_display():
         raise PatchError("Run the installation inside your desktop session: Microsoft's .NET setup does not finish without a display.")
 
 
+def updatable(state):
+    """An installed earlier release whose files this installer knows and can replace."""
+    try:
+        return state.get("state") == "installed" and \
+            state.get("version") in core.manifest(state.get("variant")).get("previous_releases", {})
+    except PatchError:
+        return False
+
+
+def update(item, bundle, state, progress):
+    """Replace the overlay of an installed earlier release in place. The Windows profile stays as it is."""
+    if state.get("target") != "steam" or state.get("game") != item.game:
+        raise PatchError("The patch state belongs to another simulator.")
+    variant = state["variant"]
+    lock = core.manifest(variant)
+    version = lock["version"]
+    previous = lock["previous_releases"][state["version"]]
+    tool = contained(item.tools, state["tool"])
+    current = tool_state(tool) or {}
+    # The tool may already carry this release: another simulator shares it, or an update was interrupted.
+    if current.get("variant") != variant or current.get("state") not in ("ready", "updating") or \
+            current.get("version") not in (state["version"], version):
+        raise PatchError("The Fenix Proton tool does not belong to this installation: " + tool.name)
+    if current["state"] == "ready":
+        files = lock["files"] if current["version"] == version else previous["files"]
+        core.verify_runner(tool, {**lock, "runner_files": {**lock["runner_files"], **files}})
+    for name, sha in previous.get("prefix_files", {}).items():
+        if digest(regular(contained(item.prefix, name))) != sha:
+            raise PatchError("Installed Fenix dependency changed: " + name)
+    for other in tool_users(item, tool.name):
+        if other.prefix.exists():
+            core.ensure_idle(other.prefix)
+    progress("Updating the Fenix Proton from %s to %s …" % (state["version"], version))
+    write_json(tool / TOOL_MARKER, {**current, "state": "updating", "version": version})
+    core.apply_overlay(item.prefix, tool, bundle, variant)
+    write_json(tool / TOOL_MARKER, {**current, "state": "ready", "version": version})
+    updated = {**state, "version": version, "updated_from": state["version"]}
+    verify_installed(item, updated)
+    write_json(item.marker, updated)
+    progress("Patch updated. The Windows profile, Fenix and its settings are unchanged.")
+
+
 def install(item, bundle, progress=lambda _: None, proton=None):
     core.host_check()
-    require_display()
     bundle = core.verify_bundle(bundle)
     version = core.manifest()["version"]
     with locked(item):
@@ -405,7 +446,11 @@ def install(item, bundle, progress=lambda _: None, proton=None):
                 verify_installed(item, state)
                 progress("This patch version is already installed.")
                 return
+            if updatable(state):
+                update(item, bundle, state, progress)
+                return
             raise PatchError("A previous patch transaction exists. Restore it before reinstalling.")
+        require_display()
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
         work = item.state / ("work-" + stamp)
         ready = [path for path in sorted(item.tools.glob("Proton-Fenix-A320-*")) if (tool_state(path) or {}).get("state") == "ready"] \
@@ -462,7 +507,7 @@ def install(item, bundle, progress=lambda _: None, proton=None):
                     core.prepare_framework(wine, item.state / "downloads", progress, "win7")
                     progress("Preparing fonts, graphics dependencies and Fenix settings …")
                     core.graphics_and_fonts(prefix, tool, wine)
-                    state["configured"] = core.configure_prefix(prefix, GAMES[item.game]["settings"])
+                    core.apply_settings(state, prefix, GAMES[item.game]["settings"])
                     core.prepare_geometry(wine, item.state / "downloads", bundle, progress)
                 finally:
                     wine.stop()
@@ -490,6 +535,8 @@ def verify_installed(item, state):
         raise PatchError("The patch state belongs to another simulator.")
     lock = core.manifest(state.get("variant"))
     if state.get("version") != lock["version"]:
+        if updatable(state):
+            raise PatchError("Patch %s is installed. Update it to %s first." % (state["version"], lock["version"]))
         raise PatchError("This installed patch version is not supported by the current installer.")
     tool = contained(item.tools, state["tool"])
     verify_tool(tool, state["variant"], state["version"])
@@ -576,11 +623,11 @@ def configure(item, progress=lambda _: None):
         for path in (item.prefix / core.CONFIG).glob("*.xml"):
             if path.name in ("fenixConfig.xml", "persistancy.xml"):
                 shutil.copy2(regular(path), backup / path.name)
-        state["configured"] = core.configure_prefix(item.prefix, GAMES[item.game]["settings"])
+        message = core.apply_settings(state, item.prefix, GAMES[item.game]["settings"])
         write_json(item.marker, state)
         if not state["configured"]:
-            raise PatchError("Start Fenix once and sign in, then close it and apply settings again. CPU rendering and Legacy readouts need its initial settings files.")
-        progress("CPU displays, Legacy readouts and Fenix autostart configured.")
+            raise PatchError(core.NEEDS_SIGN_IN)
+        progress(message)
 
 
 def windows_app(item, executable=None, progress=lambda _: None, *, manager=False, wait=None):
@@ -652,8 +699,10 @@ def snapshot(item):
         if item.marker.exists():
             state = read_json(item.marker)
             result.update(state=state.get("state", "interrupted"), installed=state.get("state") == "installed",
-                          configured=state.get("configured") is True, can_restore=True,
-                          installed_version=state.get("version"), tool=state.get("tool"))
+                          configured=state.get("configured") is True, readouts=core.readouts_set(state),
+                          can_restore=True,
+                          installed_version=state.get("version"), tool=state.get("tool"),
+                          update_available=updatable(state))
             if result["installed"]:
                 result["tool_selected"] = selected_tool(item) == state.get("tool")
                 if not result["tool_selected"]:

@@ -11,8 +11,8 @@ DASHBOARD = "https://fenixsim.com/dashboard/"
 
 
 def settings_ready(target):
-    folder = target.prefix / core.CONFIG
-    return all((folder / name).is_file() for name in ("fenixConfig.xml", "persistancy.xml"))
+    # Fenix writes this file at sign-in. persistancy.xml can follow later and has its own step.
+    return (target.prefix / core.CONFIG / "fenixConfig.xml").is_file()
 
 
 def installers():
@@ -48,6 +48,7 @@ def overview(target):
     steam = target.kind == "steam"
     broken = state not in ("available", "installed", "legacy")
     patched = status.get("installed") or state == "legacy"
+    update = bool(status.get("update_available"))
     steps = [{
         "id": "install", "title": "Install the compatibility patch", "done": bool(patched),
         "text": ("Copies the simulator's Windows profile, installs Microsoft .NET Framework 4.8 and the Fenix fixes. "
@@ -56,6 +57,12 @@ def overview(target):
                  "Takes 5–15 minutes and needs an internet connection."),
         "button": "Install patch",
     }]
+    if update:
+        # The later steps stay as they were and count again once the update is in.
+        steps[0].update(title="Update the compatibility patch", done=False, button="Update patch",
+                        text="Patch %s is installed; this installer brings %s. Fenix, your sign-in and its settings "
+                             "are kept. Close the simulator and Fenix first."
+                             % (status.get("installed_version"), status.get("version")))
     if steam:
         running = status.get("steam_running")
         steps.append({
@@ -74,7 +81,7 @@ def overview(target):
         "button": "Run Fenix Installer", "needs_file": True, "link": DASHBOARD,
     }, {
         "id": "open", "title": "Open Fenix and sign in", "done": bool(status.get("fenix_installed")) and settings_ready(target),
-        "text": "Sign in and activate your aircraft. Then close Fenix; its settings are needed for the last step.",
+        "text": "Sign in and activate your aircraft. Then close Fenix; its settings are needed for the next step.",
         "button": "Open Fenix",
     }, {
         "id": "configure", "title": "Apply the display settings", "done": status.get("configured") is True,
@@ -82,6 +89,14 @@ def overview(target):
                 "and starts Fenix together with the simulator.",
         "button": "Apply settings",
     }]
+    if status.get("configured") is True and status.get("readouts") is False:
+        steps.append({
+            "id": "readouts", "title": "Set the Legacy FCU readouts", "done": False,
+            "text": "Fenix has not created the file for this setting yet. Start %s %s, load the Fenix A320 once and "
+                    "close the simulator. Then apply the setting; CPU rendering and autostart are already in place."
+                    % (target.title.split(" on ")[0], "from Steam" if steam else "through Flightdeck"),
+            "button": "Apply setting",
+        })
     if state == "legacy":
         # An earlier local setup is active and stays as it is.
         for step in steps:
@@ -101,7 +116,7 @@ def overview(target):
             "message": message, "can_restore": bool(status.get("can_restore")), "complete": not broken and current is None,
             "finish": "Start %s %s. Fenix starts with it." % (target.title.split(" on ")[0],
                                                              "from Steam" if steam else "through Flightdeck"),
-            "update": bool(status.get("update_available"))}
+            "update": update}
 
 
 def perform(target, action, bundle, progress, executable=None, proton=None):
@@ -125,7 +140,7 @@ def perform(target, action, bundle, progress, executable=None, proton=None):
         progress("Fenix closed.")
     elif action == "manager":
         target.app(progress, manager=True)
-    elif action == "configure":
+    elif action in ("configure", "readouts"):
         target.configure(progress)
     elif action == "restore":
         target.restore(progress)

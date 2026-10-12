@@ -472,9 +472,29 @@ def xml_settings(path, changes):
     return True
 
 
+NEEDS_SIGN_IN = ("Start Fenix once and sign in, then close it and apply settings again. "
+                 "CPU rendering needs its initial settings file.")
+
+
+def apply_settings(state, prefix, folder="Microsoft Flight Simulator 2024"):
+    """Record what could be written and return the message for the user."""
+    state["configured"], state["readouts"] = configure_prefix(prefix, folder)
+    if state["readouts"]:
+        return "CPU displays, Legacy readouts and Fenix autostart configured."
+    # Reported for a fresh installation: persistancy.xml first appears when the aircraft is loaded.
+    return ("CPU displays and Fenix autostart configured. Fenix has not created the file for the FCU readout "
+            "setting yet: load the aircraft once in the simulator, close the simulator and apply settings again.")
+
+
+def readouts_set(state):
+    # Before this key existed, "configured" already required the readout setting.
+    return state.get("readouts", state.get("configured")) is True
+
+
 def configure_prefix(prefix, folder="Microsoft Flight Simulator 2024"):
+    """Whether the display settings with autostart, and the Legacy readouts, could be written."""
     if not (prefix / PROGRAM / "Fenix.exe").is_file():
-        return False
+        return False, False
     settings = contained(prefix, CONFIG / "fenixConfig.xml")
     persisted = contained(prefix, CONFIG / "persistancy.xml")
     ready = xml_settings(settings, {"displayMode": "CPU", "newRender": "false", "preferCPU": "true", "multithread": "true"})
@@ -508,7 +528,7 @@ def configure_prefix(prefix, folder="Microsoft Flight Simulator 2024"):
             node = ET.SubElement(entry, tag)
         node.text = value
     atomic(path, ET.tostring(root, encoding="utf-8", xml_declaration=True))
-    return ready and legacy
+    return ready, ready and legacy
 
 
 def copy_tree(source, destination):
@@ -573,6 +593,7 @@ def install(runtime, bundle, progress=lambda _: None):
             write_json(backup / "previous-patch.json", upgrade)
             state.update({key: upgrade[key] for key in
                           ("backup", "previous_runner", "previous_prefix", "original_prefix_id", "configured")})
+            state["readouts"] = readouts_set(upgrade)
             state["proton_before"] = upgrade.get("proton_before")
             state["upgrade_backup"] = str(backup.relative_to(root))
             state["upgrade_previous_prefix"] = "local/msfs-prefix.before-fenix-update-" + stamp
@@ -604,7 +625,7 @@ def install(runtime, bundle, progress=lambda _: None):
                         prepare_framework(wine, root / "private/fenix-downloads", progress)
                         progress("Preparing fonts, graphics dependencies and Fenix settings …")
                         graphics_and_fonts(staged, runner, wine)
-                        state["configured"] = configure_prefix(staged)
+                        apply_settings(state, staged)
                     prepare_geometry(wine, root / "private/fenix-downloads", bundle, progress)
                 finally:
                     wine.stop()
@@ -715,11 +736,11 @@ def configure(runtime, progress=lambda _: None):
         for path in (prefix / CONFIG).glob("*.xml"):
             if path.name in ("fenixConfig.xml", "persistancy.xml"):
                 shutil.copy2(regular(path), backup / path.name)
-        state["configured"] = configure_prefix(prefix)
+        message = apply_settings(state, prefix)
         write_json(root / MARKER, state)
         if not state["configured"]:
-            raise PatchError("Start Fenix once and sign in, then close it and apply settings again. CPU rendering and Legacy readouts need its initial settings files.")
-        progress("CPU displays, Legacy readouts and Fenix autostart configured.")
+            raise PatchError(NEEDS_SIGN_IN)
+        progress(message)
 
 
 def manager_path(prefix):
@@ -810,7 +831,8 @@ def snapshot(runtime):
         if marker.exists():
             state = read_json(marker)
             result.update(state=state.get("state", "interrupted"), installed=state.get("state") == "installed",
-                          configured=state.get("configured") is True, can_restore=not state.get("migrated"),
+                          configured=state.get("configured") is True, readouts=readouts_set(state),
+                          can_restore=not state.get("migrated"),
                           installed_version=state.get("version"),
                           update_available=state.get("state") == "installed" and
                           state.get("version") in manifest().get("previous_releases", {}))

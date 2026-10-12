@@ -18,7 +18,14 @@ Fenix ist ungetestet.
 3. Den fünf Schritten folgen: Patch einrichten, Steam auf **Proton Fenix A320**
    umstellen, offiziellen Fenix-Installer ausführen, anmelden, Anzeigen
    einstellen. Erledigte Schritte sind abgehakt; die Einrichtung lässt sich
-   schließen und später fortsetzen.
+   schließen und später fortsetzen. Legt Fenix die Datei für die
+   Legacy-FCU-Anzeigen erst nach dem ersten Laden des Flugzeugs an, folgt dafür
+   ein weiterer Schritt.
+
+Ein vorhandenes preview.5 aktualisiert **Patch aktualisieren** an Ort und
+Stelle: Profil, Fenix, Anmeldung und Einstellungen bleiben erhalten. preview.5
+startete den Simulator aus Steam nicht, weil eine Bibliothek im
+Steam-Container fehlte.
 
 Der Installer legt das eigene Proton an, weil Steam Proton Experimental laufend
 aktualisiert und die Korrekturen zu genau einem Wine-Stand gehören. Andere
@@ -42,6 +49,8 @@ Grenzen: [steam.md](steam.md).
    die normale Installation einschließlich der angebotenen Voraussetzungen abschließen.
 5. Fenix öffnen, anmelden und aktivieren. Anschließend Fenix samt Helfern schließen.
 6. CPU-Anzeigen und Legacy-Readouts anwenden. Danach MSFS über Flightdeck starten.
+   Fehlen die Readout-Einstellungen von Fenix noch, das Flugzeug einmal laden
+   und die Einstellung erneut anwenden.
 
 Du benötigst die gekaufte Fenix-Lizenz, Python 3.10+, glibc 2.38+, GNU `cp`
 und einen Webbrowser für die geführte Einrichtung. Keine Root-Rechte nötig.

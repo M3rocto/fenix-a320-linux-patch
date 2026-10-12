@@ -21,6 +21,9 @@ TARGETS = {
     "dlls/win32u/win32u.so": "files/lib/wine/x86_64-unix/win32u.so",
     "dlls/winex11.drv/winex11.so": "files/lib/wine/x86_64-unix/winex11.so",
 }
+# configure links ntdll.so against libunwind when the build host has it. The
+# pinned runners do not, and neither Steam Linux Runtime ships the library.
+CONFIGURE = ("--enable-win64", "--disable-tests", "--enable-silent-rules", "--without-ffmpeg", "--without-unwind")
 
 
 def sha(path):
@@ -88,8 +91,7 @@ def main():
     output = build / "objects"; output.mkdir()
     flags = ("-g -O2 -ffile-prefix-map=" + str(ROOT) + "=/usr/src/fenix-a320-linux-patch"
              " -ffile-prefix-map=" + str(build) + "=/usr/src/fenix-a320-linux-patch/build")
-    run([str(source / "configure"), "--enable-win64", "--disable-tests", "--enable-silent-rules", "--without-ffmpeg",
-         "CFLAGS=" + flags, "CROSSCFLAGS=" + flags], output)
+    run([str(source / "configure"), *CONFIGURE, "CFLAGS=" + flags, "CROSSCFLAGS=" + flags], output)
     run(["make", "depend"], output)
     run(["make", "-j" + str(args.jobs), *TARGETS], output)
     for target, relative in TARGETS.items():

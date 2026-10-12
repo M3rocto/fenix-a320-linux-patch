@@ -120,6 +120,31 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(core.wine_binary(self.runner).name, "wine64")
         self.assertEqual(core.wine_env(self.prefix, self.runner)["WINE_DISABLE_FAST_SYNC"], "1")
 
+    def test_configure_reports_the_readout_setting_separately(self):
+        directory = self.prefix / "drive_c/users/test/AppData/Roaming/Microsoft Flight Simulator 2024"
+        directory.mkdir(parents=True, exist_ok=True)
+        self.assertEqual(core.configure_prefix(self.prefix), (False, False))
+        self.put(self.prefix / core.PROGRAM / "Fenix.exe", "synthetic app")
+        # Without its sign-in settings nothing counts as configured.
+        self.put(self.prefix / core.CONFIG / "persistancy.xml", "<Settings/>")
+        self.assertEqual(core.configure_prefix(self.prefix), (False, False))
+        (self.prefix / core.CONFIG / "persistancy.xml").unlink()
+        # Fenix writes persistancy.xml later; displays and autostart do not wait for it.
+        self.put(self.prefix / core.CONFIG / "fenixConfig.xml", "<Config/>")
+        self.assertEqual(core.configure_prefix(self.prefix), (True, False))
+        self.assertFalse((self.prefix / core.CONFIG / "persistancy.xml").exists())
+        self.assertEqual(ET.parse(self.prefix / core.CONFIG / "fenixConfig.xml").findtext("displayMode"), "CPU")
+        self.assertIsNotNone(ET.parse(directory / "exe.xml").find("Launch.Addon"))
+        state = {}
+        self.assertIn("load the aircraft once", core.apply_settings(state, self.prefix))
+        self.assertEqual(state, {"configured": True, "readouts": False})
+        self.put(self.prefix / core.CONFIG / "persistancy.xml", "<Settings/>")
+        self.assertIn("Legacy readouts", core.apply_settings(state, self.prefix))
+        self.assertEqual(state, {"configured": True, "readouts": True})
+        # States written before the separate key meant both settings.
+        self.assertTrue(core.readouts_set({"configured": True}))
+        self.assertFalse(core.readouts_set({"configured": False}))
+
     def prepare_upgrade(self):
         core.install(self.root, self.bundle)
         state = core.read_json(self.root / core.MARKER)
@@ -338,8 +363,8 @@ class InstallerTests(unittest.TestCase):
         self.put(self.prefix / core.CONFIG / "persistancy.xml", "<Settings><fcuReadoutsType>1</fcuReadoutsType><Volume>0.4</Volume></Settings>")
         directory = self.prefix / "drive_c/users/test/AppData/Roaming/Microsoft Flight Simulator 2024"
         self.put(directory / "exe.xml", '<SimBase.Document><Launch.Addon><Name>Other addon</Name><Path>C:\\Other.exe</Path></Launch.Addon></SimBase.Document>')
-        self.assertTrue(core.configure_prefix(self.prefix))
-        self.assertTrue(core.configure_prefix(self.prefix))
+        self.assertEqual(core.configure_prefix(self.prefix), (True, True))
+        self.assertEqual(core.configure_prefix(self.prefix), (True, True))
         doc = ET.parse(self.prefix / core.CONFIG / "fenixConfig.xml")
         self.assertEqual(doc.findtext("displayMode"), "CPU")
         self.assertEqual(doc.findtext("UserChoice"), "keep")
