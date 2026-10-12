@@ -4768,3 +4768,114 @@ impl Wine for RecordingWine<'_> {
         Ok(())
     }
 }
+
+/// Every entry below `root` with what an extraction decides: kind, permission
+/// bits, modification time, and link target or content digest.
+fn extracted(root: &Path) -> BTreeMap<String, String> {
+    let mut entries = BTreeMap::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        for entry in fs::read_dir(&directory).unwrap() {
+            let path = entry.unwrap().path();
+            let info = fs::symlink_metadata(&path).unwrap();
+            let name = path
+                .strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned();
+            let described = if info.file_type().is_symlink() {
+                format!("link -> {}", fs::read_link(&path).unwrap().display())
+            } else if info.is_dir() {
+                pending.push(path);
+                format!(
+                    "directory {:o} at {}.{:09}",
+                    info.mode() & 0o7777,
+                    info.mtime(),
+                    info.mtime_nsec()
+                )
+            } else {
+                format!(
+                    "file {:o} at {}.{:09}, {} links, {} bytes, {}",
+                    info.mode() & 0o7777,
+                    info.mtime(),
+                    info.mtime_nsec(),
+                    info.nlink(),
+                    info.size(),
+                    fsx::digest(&path).unwrap()
+                )
+            };
+            entries.insert(name, described);
+        }
+    }
+    entries
+}
+
+#[test]
+#[ignore = "needs the network and 4 GB of disk: fetches the pinned Proton (350 MB) and extracts it with both installers"]
+fn real_proton_archive() {
+    let Some(lab) = Lab::new() else { return };
+    let pinned = steam::proton_downloads().remove(0);
+    // Kept between runs; a complete file with the right digest is not fetched again.
+    let cache = Path::new(env!("CARGO_TARGET_TMPDIR")).join("pinned-proton");
+    let host = Host::new(lab.base(Side::Rust));
+    let file = pinned.url.rsplit('/').next().unwrap();
+    let archive = fenix_patch::download::download(
+        &host,
+        &pinned.url,
+        &cache.join(file),
+        &pinned.sha256,
+        1024 * 1024 * 1024,
+    )
+    .unwrap();
+    let python = lab.python_eval(
+        &format!("{PYTHON_OUTCOME}result = outcome(lambda: str(steam.extract_proton(Path(argument[0]), Path('world/proton').resolve(), argument[1])))"),
+        &json!([archive, pinned.folder]),
+    );
+    assert_eq!(python[0], "ok", "{python}");
+    let started = std::time::Instant::now();
+    let rust = steam::extract_proton(
+        &host,
+        &archive,
+        &lab.base(Side::Rust).join("world/proton"),
+        &pinned.folder,
+    )
+    .unwrap();
+    notice(&format!(
+        "the Rust extraction of {file} took {:?}",
+        started.elapsed()
+    ));
+    let tool = lab
+        .base(Side::Rust)
+        .join("world/proton")
+        .join(&pinned.folder);
+    assert_eq!(rust, tool);
+    let (python, rust) = (
+        extracted(&lab.base(Side::Python).join("world/proton")),
+        extracted(&lab.base(Side::Rust).join("world/proton")),
+    );
+    notice(&format!("{} entries extracted", rust.len()));
+    assert!(rust.len() > 1000);
+    let differing: Vec<String> = python
+        .keys()
+        .chain(rust.keys())
+        .filter(|name| python.get(*name) != rust.get(*name))
+        .map(|name| {
+            format!(
+                "{name}\n  Python: {:?}\n  Rust:   {:?}",
+                python.get(name),
+                rust.get(name)
+            )
+        })
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .take(20)
+        .collect();
+    assert!(
+        differing.is_empty(),
+        "the extractions differ:\n{}",
+        differing.join("\n")
+    );
+    // Proton as extracted must still be the build the manifest of this repository pins.
+    let lock = core::read_manifest(&worktree(), Some(&pinned.variant)).unwrap();
+    core::verify_runner(&host, &tool, &lock).unwrap();
+}
