@@ -508,6 +508,48 @@ mod tests {
         assert_eq!(shown(), "fenix-tools: the probe failed\n");
     }
 
+    /// The machine without the user's display, for the programs a test starts.
+    struct Quiet(Host);
+
+    impl fenix_patch::system::System for Quiet {
+        fn root(&self) -> &Path {
+            self.0.root()
+        }
+
+        fn environ(&self) -> Env {
+            Env(std::env::vars_os()
+                .filter(|(name, _)| name != "DISPLAY" && name != "WAYLAND_DISPLAY")
+                .collect())
+        }
+    }
+
+    #[test]
+    #[cfg(target_env = "gnu")]
+    fn the_real_readelf_names_the_libraries_of_a_program() {
+        if fsx::which("readelf", std::env::var_os("PATH")).is_none() {
+            eprintln!("readelf was not found; its real output is not read");
+            return;
+        }
+        let quiet = Quiet(Host::new(std::env::temp_dir()));
+        let errors = Shared::default();
+        let mut ctx = Context::host(&quiet);
+        ctx.err = Mutex::new(Box::new(errors.clone()));
+        // This test program itself: linked against the C library like Wine's modules.
+        let libraries = needed(&ctx, &std::env::current_exe().unwrap()).unwrap();
+        assert!(libraries.contains("libc.so.6"), "{libraries:?}");
+        assert!(libraries.iter().all(|name| !name.contains(['[', ']', ' '])));
+        let missing = needed(&ctx, Path::new("/nonexistent/module.so")).unwrap_err();
+        assert!(
+            missing
+                .to_string()
+                .ends_with("returned non-zero exit status 1."),
+            "{missing}"
+        );
+        // What readelf itself said about it is passed on.
+        let shown = String::from_utf8(errors.0.lock().unwrap().clone()).unwrap();
+        assert!(shown.contains("/nonexistent/module.so"), "{shown}");
+    }
+
     #[test]
     fn a_started_program_is_asked_to_end_and_waited_for() {
         // No display of the user for anything a test starts.
