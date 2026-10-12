@@ -140,6 +140,11 @@ case "$1" in
             printf '%s says hello\r\n' "$program"
             printf '%s notes something\n' "$program" >&2
             [ "$program" != "$FAKE_FAILING_PROBE" ] || exit 3
+            # Ctrl+C arrives while this probe runs: the test's machine sees the file.
+            if [ "$program" = "$FAKE_INTERRUPTED_PROBE" ]; then
+                : > "$FAKE_LOG.interrupt"
+                exec sleep 30
+            fi
         fi ;;
 esac
 "#;
@@ -429,6 +434,19 @@ impl System for World {
 
     fn var(&self, name: &str) -> Option<OsString> {
         self.environ.lock().unwrap().get(name).cloned()
+    }
+
+    /// Ctrl+C, once, as soon as a stand-in has left the file that asks for it.
+    fn interrupted(&self) -> Result<()> {
+        let asked = self.var("FAKE_LOG").map(|log| {
+            let mut path = log;
+            path.push(".interrupt");
+            PathBuf::from(path)
+        });
+        match asked {
+            Some(path) if fs::remove_file(&path).is_ok() => Err(fenix_patch::Error::Interrupted),
+            _ => Ok(()),
+        }
     }
 
     fn prepare_geometry(

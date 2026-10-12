@@ -683,3 +683,33 @@ fn a_missing_proton_source_comes_from_the_repository_bundle_json_names() {
     assert_eq!(fs::read(&archive).unwrap(), content);
     assert!(out.join("wine/README").is_file());
 }
+
+#[test]
+#[ignore = "needs the network: fetches the pinned xgameruntime source (57 kB) from GitHub"]
+fn a_pinned_source_arrives_from_github_with_its_checksum() {
+    let fixture = Fixture::new();
+    let root = &fixture.tree.root;
+    let real = fenix_patch::json::loads(&read(
+        &fenix_tools::repository().unwrap().join("bundle.json"),
+    ))
+    .unwrap();
+    let archive = root.join("sources/xgameruntime-source.tar.gz");
+    fs::remove_file(&archive).unwrap();
+    fixture.tree.edit(|lock| {
+        lock["xgameruntime_revision"] = real["xgameruntime_revision"].clone();
+        lock["sources"]["xgameruntime-source.tar.gz"] =
+            real["sources"]["xgameruntime-source.tar.gz"].clone();
+    });
+    let mut run = fixture.run();
+    run.fetch = Some(Box::new(fenix_patch::download::https));
+    let outcome = run.tools(&["build", "--prepare-only"]);
+    assert_eq!((outcome.code, outcome.output.as_str()), (0, ""));
+    assert_eq!(
+        digest(&archive),
+        real["sources"]["xgameruntime-source.tar.gz"]
+    );
+    // The real submodule took the place of the empty directory.
+    let submodule = root.join("build/wine/dlls/xgameruntime");
+    assert!(fs::read_dir(&submodule).unwrap().count() > 3);
+    assert_eq!(fixture.calls().len(), 2);
+}

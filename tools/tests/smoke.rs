@@ -668,6 +668,27 @@ fn wine_is_stopped_whatever_a_probe_does() {
     stopped("failing", "WINE_TRACK_WRITECOPY=1");
     fixture.world.set("FAKE_FAILING_PROBE", "");
 
+    // Ctrl+C ends the probe and the test, but not before Wine is stopped.
+    fixture
+        .world
+        .set("FAKE_INTERRUPTED_PROBE", "shared-cursor-probe.exe");
+    let started = Instant::now();
+    let outcome = fixture.smoke("interrupted", &[]);
+    assert_eq!(outcome.code, 130, "{}", outcome.output);
+    assert!(
+        outcome
+            .output
+            .ends_with("audio-notification-probe.exe notes something\n\n"),
+        "{}",
+        outcome.output
+    );
+    assert!(started.elapsed() < Duration::from_secs(20));
+    let calls = stopped("interrupted", "WINE_TRACK_WRITECOPY=1");
+    assert!(
+        calls[calls.len() - 3].starts_with("wine [<LAB>/interrupted/shared-cursor-probe.exe] ")
+    );
+    fixture.world.set("FAKE_INTERRUPTED_PROBE", "");
+
     // The exit status of wineserver itself does not matter.
     fixture.world.set("FAKE_WINESERVER_STATUS", "1");
     let outcome = fixture.smoke("status", &[]);
