@@ -24,6 +24,8 @@ use std::{
 #[command(
     name = "fenix-patch",
     about = "Fenix A320 Linux Patch — MSFS 2020/2024 on Steam, MSFS 2024 in Flightdeck",
+    version,
+    disable_version_flag = true,
     args_override_self = true,
     infer_long_args = true
 )]
@@ -61,6 +63,9 @@ pub struct Args {
     /// Print the setup address instead of opening a browser
     #[arg(long)]
     pub no_browser: bool,
+    /// Print the version of this installer
+    #[arg(long, action = clap::ArgAction::Version)]
+    pub version: Option<bool>,
 }
 
 /// What the command line needs from its surroundings.
