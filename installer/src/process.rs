@@ -62,6 +62,8 @@ pub enum Output<'a> {
     Capture,
     /// Output is collected, errors are discarded.
     CaptureOutput,
+    /// Output is discarded, errors are shown.
+    DiscardOutput,
 }
 
 #[derive(Debug)]
@@ -136,6 +138,9 @@ pub fn spawn(cmd: &Cmd<'_>) -> Result<Child> {
         }
         Output::CaptureOutput => {
             command.stdout(Stdio::piped()).stderr(Stdio::null());
+        }
+        Output::DiscardOutput => {
+            command.stdout(Stdio::null());
         }
     }
     command.spawn().map_err(|error| {

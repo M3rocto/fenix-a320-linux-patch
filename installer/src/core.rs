@@ -576,6 +576,12 @@ impl<'a> RealWine<'a> {
             env: wine_env(system, prefix, runner),
         }
     }
+
+    /// Python: `wine.env = env`, for a caller that runs Wine with its own environment.
+    pub fn with_env(mut self, env: Env) -> Self {
+        self.env = env;
+        self
+    }
 }
 
 impl Wine for RealWine<'_> {

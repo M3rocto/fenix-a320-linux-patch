@@ -30,7 +30,8 @@ pub enum Message {
 pub struct Stream(pub Receiver<Message>);
 
 impl Stream {
-    fn next(&self, system: &dyn System) -> Result<Option<Vec<u8>>> {
+    /// The next part of the body, `None` at its end.
+    pub fn next(&self, system: &dyn System) -> Result<Option<Vec<u8>>> {
         let waiting = Instant::now();
         loop {
             system.interrupted()?;
