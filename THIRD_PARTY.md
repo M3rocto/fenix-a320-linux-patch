@@ -23,6 +23,13 @@
   Its authorship and Wine's per-file notices are retained.
 * The installer, integration wrappers, window guard and MCDU refresh helper are MIT. The integration
   scripts originate from the MIT-licensed Flightdeck launcher, with its notices retained.
+* The installer program is linked statically with Rust crates under MIT,
+  Apache-2.0, ISC, BSD-3-Clause, Zlib, Unicode-3.0 and CDLA-Permissive-2.0
+  terms, among them rustls, ring and the Mozilla root certificates of
+  webpki-roots. Each release contains their licence texts and an inventory
+  with names, versions and licence expressions under `licenses/rust/`; the
+  release tool collects them from the exact dependency set in `Cargo.lock`
+  and refuses a crate without a licence text.
 
 The complete sources are in the same binary ZIP and in a separate corresponding
 source archive in each release. Build and relinking instructions are in BUILDING.md.

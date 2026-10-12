@@ -39,7 +39,7 @@ jobs:
           mkdir -p build/installer
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/src:ro -v "$PWD/build/installer":/out \
             -e CARGO_TARGET_DIR=/out/target -e CARGO_HOME=/out/cargo -e HOME=/out -w /src \
-            rust:1.98-alpine cargo build --release --locked --bin fenix-patch
+            rust:1.98-alpine cargo build --release --locked -p fenix-patch --bin fenix-patch
       - name: It runs without a runtime and finds nothing in an empty home
         run: |
           installer=build/installer/target/release/fenix-patch

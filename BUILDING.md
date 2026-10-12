@@ -17,7 +17,7 @@ cargo test --locked --workspace
 cargo run --locked -p fenix-tools -- smoke --runner /path/to/pinned-runner --work build/release-smoke
 docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/src:ro -v "$PWD/build/installer":/out \
   -e CARGO_TARGET_DIR=/out/target -e CARGO_HOME=/out/cargo -e HOME=/out -w /src \
-  rust:1.98-alpine cargo build --release --locked --bin fenix-patch
+  rust:1.98-alpine cargo build --release --locked -p fenix-patch --bin fenix-patch
 cargo run --locked -p fenix-tools -- release --installer build/installer/target/release/fenix-patch
 ```
 
@@ -28,6 +28,13 @@ distribution without a runtime; the Alpine container above builds it against
 musl. `release` refuses an installer that is not statically linked or reports
 another version than `bundle.json`. `./install.sh` in a source checkout builds
 and runs the installer with the host toolchain instead.
+
+Three files under `integration/` are Python or contain it:
+`fenix-display-refresh.py`, `xodus-wine-launch` and `launch-msfs.sh`. They are
+the launch scripts of Flightdeck's Python releases (0.1.x) with the Fenix
+additions, shipped unchanged and pinned by hash in `bundle.json`; the installer
+only copies them. `tests/test_display_refresh.py` checks the first of them and
+needs that launcher's interpreter. Nothing else in this project is Python.
 
 Use a fresh `--build-dir`; existing build trees are never overwritten. `--prepare-only` verifies and applies all patches
 without compiling. The build verifies both source archives, populates the
