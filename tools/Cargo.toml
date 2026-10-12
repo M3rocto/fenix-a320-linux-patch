@@ -1,0 +1,37 @@
+[package]
+name = "fenix-tools"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Maintainer tooling of the Fenix A320 Linux Patch: Wine builds, smoke test and release"
+publish = false
+
+[lib]
+name = "fenix_tools"
+path = "src/lib.rs"
+
+[[bin]]
+name = "fenix-tools"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.6.6", features = ["derive"] }
+fenix-patch = { path = "../installer" }
+flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs"] }
+regex = "1.13.1"
+rustix = { version = "1.1.4", features = ["process"] }
+signal-hook = { version = "0.4.5", default-features = false }
+tar = { version = "0.4.46", default-features = false }
+x11rb = { version = "0.13.2", default-features = false }
+zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "deny"

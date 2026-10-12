@@ -1,5 +1,5 @@
 [workspace]
-members = ["installer"]
+members = ["installer", "tools"]
 resolver = "3"
 
 [workspace.package]
