@@ -86,10 +86,12 @@ pub fn expanduser(text: impl AsRef<OsStr>, home_var: Option<OsString>) -> PathBu
     let normal = path(text);
     let mut components = normal.components();
     match components.next() {
-        Some(Component::Normal(first)) if first == "~" => home(home_var).join(components.as_path()),
+        Some(Component::Normal(first)) if first == "~" => {
+            path(home(home_var).join(components.as_path()))
+        }
         Some(Component::Normal(first)) if first.as_bytes().starts_with(b"~") => {
             match passwd_home(&first.as_bytes()[1..]) {
-                Some(directory) => directory.join(components.as_path()),
+                Some(directory) => path(directory.join(components.as_path())),
                 None => normal,
             }
         }
@@ -536,14 +538,11 @@ pub fn copy2(source: &Path, destination: &Path) -> Result<()> {
     copystat(source, destination)
 }
 
-/// `Path.suffix`.
+/// `Path.suffix`, as `os.path.splitext` finds it: the last dot and what follows,
+/// unless only dots come before it.
 pub fn suffix(name: &str) -> &str {
     match name.rfind('.') {
-        Some(index)
-            if index + 1 < name.len() && !name[..index].trim_start_matches('.').is_empty() =>
-        {
-            &name[index..]
-        }
+        Some(index) if !name[..index].trim_start_matches('.').is_empty() => &name[index..],
         _ => "",
     }
 }
@@ -577,10 +576,15 @@ mod tests {
         assert_eq!(home(Some("".into())), Path::new("/"));
         assert_eq!(expanduser("~/a", Some("/h".into())), Path::new("/h/a"));
         assert_eq!(expanduser("~", Some("/h".into())), Path::new("/h"));
+        // Compared as text: a trailing separator would show in messages.
+        assert_eq!(expanduser("~/", Some("/h/".into())).to_str(), Some("/h"));
+        assert_eq!(expanduser("~/a/", Some("/h".into())).to_str(), Some("/h/a"));
         assert_eq!(expanduser("a/~", Some("/h".into())), Path::new("a/~"));
         assert_eq!(suffix("Fenix.EXE"), ".EXE");
         assert_eq!(suffix(".exe"), "");
-        assert_eq!(suffix("a."), "");
+        assert_eq!(suffix("a."), ".");
+        assert_eq!(suffix("..exe"), "");
+        assert_eq!(suffix("a..b"), ".b");
     }
 
     #[test]
