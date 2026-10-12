@@ -58,9 +58,10 @@ Flightdeck's **Add-ons → Fenix A320** panel provides the same workflow without
 opening a terminal. It downloads a pinned, checksummed patch release. Login and
 activation remain in the official Fenix software.
 
-Requirements: x86_64 Linux, Python 3.10+, glibc **2.38+**, GNU `cp`, and the
-one of the exact Xodus/Proton builds pinned in `bundle.json`. The guided setup uses your
-web browser and needs no additional packages. The Microsoft Framework and geometry
+Requirements: x86_64 Linux, glibc **2.38+**, GNU `cp`, and
+one of the exact Xodus/Proton builds pinned in `bundle.json`. The installer is a
+single self-contained program; it needs no Python or other runtime. The guided
+setup uses your web browser and needs no additional packages. The Microsoft Framework and geometry
 downloads need internet access. The official Fenix Installer handles its
 WebView2, .NET Desktop Runtime and Visual C++ prerequisites.
 

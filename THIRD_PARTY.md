@@ -30,14 +30,14 @@ The runner itself, its fonts, DXVK and vkd3d binaries are supplied by the user's
 Flightdeck or Proton installation and are not redistributed by this project.
 For Steam, the installer can download the unmodified CachyOS Proton build from
 its [GitHub release](https://github.com/CachyOS/proton-cachyos/releases); the
-URL and SHA-256 pin are in `fenix_patch/steam.py`.
+URL and SHA-256 pin are in `installer/src/steam.rs`.
 
 The Direct2D geometry provider is downloaded separately from Microsoft's
 [Platform Update for Windows 7 (KB2670838)](https://www.microsoft.com/en-us/download/details.aspx?id=36805).
 The installer extracts only the x64 geometry library as `d2d1_geometry.dll`,
 using a separately downloaded `msdelta.dll` from Microsoft's public symbol
 server to decode the update. Neither DLL nor the update is redistributed.
-URLs and SHA-256 pins are in `fenix_patch/core.py`; package, delta-basis and
+URLs and SHA-256 pins are in `installer/src/core.rs`; package, delta-basis and
 output checksums are checked before committing the staging profile.
 
 `WINE_D2D1_GEOMETRY_PROVIDER=FenixDisplay.exe` limits this dependency to Fenix's

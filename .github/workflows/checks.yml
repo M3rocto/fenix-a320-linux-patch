@@ -4,19 +4,54 @@ permissions:
   contents: read
 jobs:
   installer:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python: ['3.10', '3.14']
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      RUSTUP_TOOLCHAIN: 1.98.0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.98.0 --profile minimal --component rustfmt --component clippy
+      - name: Format and lint
+        run: |
+          cargo +1.98.0 fmt --all -- --check
+          cargo +1.98.0 clippy --locked --workspace --all-targets -- -D warnings
+      - name: Installer and maintainer tool tests
+        run: cargo +1.98.0 test --locked --workspace
+      - name: Verify the pinned sources and apply every patch
+        run: |
+          cargo +1.98.0 build --locked -p fenix-tools
+          target/debug/fenix-tools build --prepare-only
+          target/debug/fenix-tools build-proton experimental-11 --build-dir build/experimental-source --prepare-only
+          target/debug/fenix-tools build-proton cachyos-10 --build-dir build/cachyos-source --prepare-only
+          target/debug/fenix-tools build-proton cachyos-11 --build-dir build/cachyos-11-source --prepare-only
+  static-installer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          python-version: ${{ matrix.python }}
-      - run: python -m unittest discover -s tests -p 'test_*.py' -v
-      - run: python scripts/build.py --prepare-only
-      - run: python scripts/build-proton.py experimental-11 --build-dir build/experimental-source --prepare-only
-      - run: python scripts/build-proton.py cachyos-10 --build-dir build/cachyos-source --prepare-only
-      - run: python scripts/build-proton.py cachyos-11 --build-dir build/cachyos-11-source --prepare-only
+          persist-credentials: false
+      - name: Build the installer as a release ships it
+        run: |
+          mkdir -p build/installer
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/src:ro -v "$PWD/build/installer":/out \
+            -e CARGO_TARGET_DIR=/out/target -e CARGO_HOME=/out/cargo -e HOME=/out -w /src \
+            rust:1.98-alpine cargo build --release --locked --bin fenix-patch
+      - name: It runs without a runtime and finds nothing in an empty home
+        run: |
+          installer=build/installer/target/release/fenix-patch
+          ! readelf -lW "$installer" | grep -q INTERP
+          ! readelf -dW "$installer" | grep -q NEEDED
+          test "$(env -i HOME="$(mktemp -d)" "$installer" targets)" = '[]'
+  legacy-integration:
+    # The display helper of the launcher's Python releases is shipped unchanged
+    # and hash-pinned; its own checks need that launcher's interpreter.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - run: python3 -m unittest tests/test_display_refresh.py -v

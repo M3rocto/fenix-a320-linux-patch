@@ -5,17 +5,29 @@ The binary ZIP includes complete, unchanged upstream source archives in
 `patches/`. Patches apply in manifest order. Retain upstream per-file notices.
 
 The initial build used x86_64 Arch Linux, GCC/MinGW-w64, autoconf, GNU make,
-Python 3 and Perl. Install Wine's normal development dependencies, including
+Python 3 and Perl for Wine's own build steps, and Rust 1.98 for this project's
+installer and maintainer tool. Install Wine's normal development dependencies, including
 FreeType, fontconfig, X11, ALSA/PulseAudio, Vulkan headers and MinGW-w64.
 The shipped ELF modules require glibc 2.38 or newer. An older-distribution build
 must be tested and published as a separately pinned artifact.
 
 ```sh
-python3 scripts/build.py --build-dir build/release --record-build
-python3 -m unittest discover -s tests -p 'test_*.py' -v
-python3 scripts/smoke.py --runner /path/to/pinned-runner --work build/release-smoke
-python3 scripts/release.py
+cargo run --locked -p fenix-tools -- build --build-dir build/release --record-build
+cargo test --locked --workspace
+cargo run --locked -p fenix-tools -- smoke --runner /path/to/pinned-runner --work build/release-smoke
+docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/src:ro -v "$PWD/build/installer":/out \
+  -e CARGO_TARGET_DIR=/out/target -e CARGO_HOME=/out/cargo -e HOME=/out -w /src \
+  rust:1.98-alpine cargo build --release --locked --bin fenix-patch
+cargo run --locked -p fenix-tools -- release --installer build/installer/target/release/fenix-patch
 ```
+
+The installer is `installer/` (program `fenix-patch`), the maintainer tool is
+`tools/` (`cargo run --locked -p fenix-tools -- --help`). The release ships the
+installer as one statically linked program, so that it runs on any x86_64
+distribution without a runtime; the Alpine container above builds it against
+musl. `release` refuses an installer that is not statically linked or reports
+another version than `bundle.json`. `./install.sh` in a source checkout builds
+and runs the installer with the host toolchain instead.
 
 Use a fresh `--build-dir`; existing build trees are never overwritten. `--prepare-only` verifies and applies all patches
 without compiling. The build verifies both source archives, populates the
@@ -23,7 +35,7 @@ xgameruntime submodule, generates spec/Vulkan headers from the included XML,
 and configures Wine with `--enable-win64 --disable-tests --enable-silent-rules
 --without-ffmpeg --without-unwind`. Without the last option `configure` links
 `ntdll.so` against the build host's libunwind, which the pinned runners and the
-Steam Linux Runtime containers do not have. It builds the eleven targets listed in `scripts/build.py` and
+Steam Linux Runtime containers do not have. It builds the eleven targets listed in `tools/src/build.rs` and
 the independent MIT window guard, geometry setup and MCDU refresh helpers. Debug sections are stripped from release files.
 Compiler prefix maps replace local checkout paths in both Unix and Windows
 modules with `/usr/src/fenix-a320-linux-patch`.
@@ -42,12 +54,12 @@ partners, original source archive, port and output modules. Build all overlays
 before packaging a release:
 
 ```sh
-python3 scripts/build-proton.py experimental-11 --build-dir build/experimental --record-build
-python3 scripts/build-proton.py cachyos-10 --build-dir build/cachyos --record-build
-python3 scripts/build-proton.py cachyos-11 --build-dir build/cachyos-11 --record-build
-python3 scripts/smoke.py --variant experimental-11 --runner /path/to/Proton-Experimental --work build/experimental-smoke --steam-runtime /path/to/SteamLinuxRuntime_4
-python3 scripts/smoke.py --variant cachyos-10 --runner /path/to/Proton-CachyOS --work build/cachyos-smoke --steam-runtime /path/to/SteamLinuxRuntime_sniper
-python3 scripts/smoke.py --variant cachyos-11 --runner /path/to/proton-cachyos-11.0-20261005-slr-x86_64 --work build/cachyos-11-smoke --steam-runtime /path/to/SteamLinuxRuntime_4
+cargo run --locked -p fenix-tools -- build-proton experimental-11 --build-dir build/experimental --record-build
+cargo run --locked -p fenix-tools -- build-proton cachyos-10 --build-dir build/cachyos --record-build
+cargo run --locked -p fenix-tools -- build-proton cachyos-11 --build-dir build/cachyos-11 --record-build
+cargo run --locked -p fenix-tools -- smoke --variant experimental-11 --runner /path/to/Proton-Experimental --work build/experimental-smoke --steam-runtime /path/to/SteamLinuxRuntime_4
+cargo run --locked -p fenix-tools -- smoke --variant cachyos-10 --runner /path/to/Proton-CachyOS --work build/cachyos-smoke --steam-runtime /path/to/SteamLinuxRuntime_sniper
+cargo run --locked -p fenix-tools -- smoke --variant cachyos-11 --runner /path/to/proton-cachyos-11.0-20261005-slr-x86_64 --work build/cachyos-11-smoke --steam-runtime /path/to/SteamLinuxRuntime_4
 ```
 
 Steam starts a Proton inside the runtime named by `require_tool_appid` in its
@@ -87,10 +99,11 @@ loader, cursor, write-copy, IOCP and audio regressions.
 
 ## Release files
 
-`scripts/release.py` exports only allowlisted project files. It requires all
-source archives and validates binary hashes. It creates:
+The `release` command exports only allowlisted project files. It requires all
+source archives and validates binary hashes. It adds the licence texts of the
+Rust crates linked into the installer under `licenses/rust/`. It creates:
 
-* `*-linux-x86_64.zip`: standalone installer, Wine overlay, complete sources.
+* `*-linux-x86_64.zip`: standalone installer program, Wine overlay, complete sources.
 * `*-source.tar.gz`: complete corresponding source, including upstream archives.
 * `SHA256SUMS`: checksums for both downloads.
 * `flightdeck-release.json`: the pinned URL/hash used by Flightdeck.
@@ -103,10 +116,10 @@ patch download source; no separate flightsim.to listing is maintained for it.
 Make the repository public so Flightdeck can download the pinned asset without
 a GitHub login.
 
-In Flightdeck, run `python3 scripts/sync-fenix.py /path/to/this/repository`
-after building the release. This copies the reviewed MIT installer engine and
-the two checksum manifests. Flightdeck executes its vendored engine and only
-extracts the fixed payload files from the verified ZIP.
+In Flightdeck, run `cargo run --locked -p flightdeck-tools -- probe sync-fenix
+/path/to/this/repository` after building the release. This copies the two
+checksum manifests and the licence. Flightdeck installs with its own code and
+only extracts the fixed payload files from the verified ZIP.
 
 The ZIP is suitable for distribution only with its source archives and notices
 intact. Microsoft redistributables and Fenix software are separate downloads;

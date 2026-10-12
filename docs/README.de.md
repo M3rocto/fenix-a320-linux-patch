@@ -52,8 +52,9 @@ Grenzen: [steam.md](steam.md).
    Fehlen die Readout-Einstellungen von Fenix noch, das Flugzeug einmal laden
    und die Einstellung erneut anwenden.
 
-Du benötigst die gekaufte Fenix-Lizenz, Python 3.10+, glibc 2.38+, GNU `cp`
-und einen Webbrowser für die geführte Einrichtung. Keine Root-Rechte nötig.
+Du benötigst die gekaufte Fenix-Lizenz, glibc 2.38+, GNU `cp` und einen
+Webbrowser für die geführte Einrichtung. Das Installationsprogramm bringt alles
+mit; Python ist nicht mehr nötig. Keine Root-Rechte nötig.
 
 Getestet: Fenix 2.4.0.4720, MSFS 2024 1.8.16.0, Xodus Wine 11.0 und Hyprland.
 Die Cockpitanzeigen wurden im laufenden Flugzeug geprüft. Ein vollständiger

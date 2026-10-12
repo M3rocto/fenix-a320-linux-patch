@@ -4,7 +4,7 @@ Name=Fenix A320 Linux Patch
 Name[de]=Fenix A320 Linux-Patch
 Comment=Guided setup for the Fenix A320 in MSFS on Linux
 Comment[de]=Geführte Einrichtung des Fenix A320 für MSFS unter Linux
-Exec=/bin/bash -c "p=\\$1; case \\"\\$p\\" in file://*) p=\\$(python3 -c 'import sys,urllib.parse; print(urllib.parse.unquote(urllib.parse.urlparse(sys.argv[1]).path))' \\"\\$p\\");; esac; exec \\"\\${p%%/*}/install.sh\\"" fenix-a320-linux-patch %k
+Exec=/bin/bash -c "p=\\$1; case \\"\\$p\\" in file://*) p=\\${p#file://}; p=\\$(printf '%%b' \\"\\${p//%%/\\\\\\\\x}\\");; esac; exec \\"\\${p%%/*}/install.sh\\"" fenix-a320-linux-patch %k
 Icon=applications-games
 Terminal=true
 Categories=Game;Simulation;

@@ -7,3 +7,4 @@ __pycache__/
 /integration/*.exe
 *.egg-info/
 target/
+/.fenix-patch-dev
