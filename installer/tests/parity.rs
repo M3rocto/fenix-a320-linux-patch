@@ -4302,3 +4302,469 @@ fn pinned_proton_is_downloaded_and_extracted() {
     lab.same_trees("downloaded Proton");
     lab.finish();
 }
+
+#[test]
+fn paths_and_containment() {
+    let Some(lab) = Lab::new() else { return };
+    // A small maze of links: inside, outside, dangling, looping, relative and absolute.
+    lab.both(|base| {
+        let maze = base.join("world/maze");
+        fs::create_dir_all(maze.join("root/inside/deep")).unwrap();
+        fs::create_dir_all(maze.join("outside/secret")).unwrap();
+        put(&maze.join("root/inside/file.txt"), "file");
+        put(&maze.join("outside/file.txt"), "outside");
+        symlink(maze.join("outside"), maze.join("root/escape")).unwrap();
+        symlink("../outside", maze.join("root/relative escape")).unwrap();
+        symlink("inside/deep", maze.join("root/shortcut")).unwrap();
+        symlink("..", maze.join("root/inside/up")).unwrap();
+        symlink("../..", maze.join("root/inside/deep/far up")).unwrap();
+        symlink(
+            maze.join("outside/file.txt"),
+            maze.join("root/inside/file link"),
+        )
+        .unwrap();
+        symlink("nowhere/at all", maze.join("root/dangling")).unwrap();
+        symlink("loop b", maze.join("root/loop a")).unwrap();
+        symlink("loop a", maze.join("root/loop b")).unwrap();
+        symlink("self", maze.join("root/self")).unwrap();
+        symlink(maze.join("root"), maze.join("root link")).unwrap();
+        symlink("/", maze.join("root/slash")).unwrap();
+    });
+    let relatives = [
+        "inside/file.txt",
+        "inside/new/file.txt",
+        "inside/deep/../file.txt",
+        "inside/./file.txt",
+        "inside//file.txt",
+        "inside/",
+        "inside",
+        "",
+        ".",
+        "..",
+        "../outside",
+        "/etc/passwd",
+        "escape/file.txt",
+        "escape",
+        "relative escape/secret/x",
+        "shortcut/x",
+        "shortcut",
+        "inside/up/x",
+        "inside/up/inside/file.txt",
+        "inside/deep/far up/x",
+        "inside/deep/far up/root/x",
+        "inside/file link",
+        "inside/file link/x",
+        "dangling",
+        "dangling/x",
+        "dangling/x/y",
+        "loop a",
+        "loop a/x",
+        "self/x",
+        "slash/etc",
+        "slash/x",
+        "missing/a/b/c",
+        "a/../../b",
+        "inside/deep/x/../../../y",
+    ];
+    let roots = [
+        "world/maze/root",
+        "world/maze/root link",
+        "world/maze/root/shortcut",
+        "world/maze/root/dangling",
+        "world/maze/root/loop a",
+        "world/maze/missing root",
+        "world/maze/root/inside/up",
+    ];
+    let script = format!(
+        "{PYTHON_OUTCOME}import os\nresult = [[outcome(lambda: str(core.contained(Path(root).resolve() if absolute else root, relative))) for relative in argument[1]] for root in argument[0] for absolute in (True, False)]\nresult = [result, [[outcome(lambda: str(Path(root, relative).resolve())), outcome(lambda: str(Path(root, relative).resolve(strict=True)))] for root in argument[0] for relative in argument[1] if not relative.startswith('/')]]"
+    );
+    let python = lab.python_eval(&script, &json!([roots, relatives.to_vec()]));
+    let base = lab.base(Side::Rust);
+    let shown = |result: Result<PathBuf>| match result {
+        Ok(path) => json!(["ok", path.display().to_string()]),
+        Err(fenix_patch::Error::Patch(message)) => json!(["error", "PatchError", message]),
+        Err(other) => json!(["error", "other", other.to_string()]),
+    };
+    let mut differences = Vec::new();
+    let mut compare = |what: String, rust: Value, python: &Value| {
+        let (rust, python) = (
+            lab.normal(Side::Rust, &rust.to_string()),
+            lab.normal(Side::Python, &python.to_string()),
+        );
+        if rust != python {
+            differences.push(format!("{what}\n  Python: {python}\n  Rust:   {rust}"));
+        }
+    };
+    let mut row = 0;
+    for root in roots {
+        for absolute in [true, false] {
+            for (column, relative) in relatives.iter().enumerate() {
+                // Python ran in its installer directory; a relative root means the same place here.
+                let given = if absolute {
+                    fsx::resolve(&base.join(root)).unwrap()
+                } else {
+                    base.join(root)
+                };
+                let rust = shown(fsx::contained(&given, relative));
+                let expected = &python[0][row][column];
+                // A relative root is resolved by `contained` itself, so both answers are absolute.
+                compare(
+                    format!("contained({root:?}, {relative:?}), absolute root: {absolute}"),
+                    rust,
+                    expected,
+                );
+            }
+            row += 1;
+        }
+    }
+    let mut index = 0;
+    for root in roots {
+        for relative in relatives
+            .iter()
+            .filter(|relative| !relative.starts_with('/'))
+        {
+            let path = base.join(root).join(relative);
+            // `Path(root, "")` is the root itself, without a trailing separator.
+            let path = if relative.is_empty() {
+                base.join(root)
+            } else {
+                path
+            };
+            compare(
+                format!("resolve({root:?} / {relative:?})"),
+                shown(fsx::resolve(&path)),
+                &python[1][index][0],
+            );
+            compare(
+                format!("resolve strictly({root:?} / {relative:?})"),
+                shown(fsx::resolve_strict(&path)),
+                &python[1][index][1],
+            );
+            index += 1;
+        }
+    }
+    assert!(
+        differences.is_empty(),
+        "{} differences:\n{}",
+        differences.len(),
+        differences.join("\n")
+    );
+}
+
+#[test]
+fn text_helpers() {
+    let Some(lab) = Lab::new() else { return };
+    let texts = [
+        "",
+        "plain",
+        "it's",
+        "say \"hi\"",
+        "both ' and \"",
+        "back\\slash",
+        "tab\tnewline\ncarriage\rreturn",
+        "\u{0}\u{1}\u{1f}\u{7f}",
+        "\u{80}\u{9f}\u{a0}\u{ad}",
+        "\u{e4}\u{f6}\u{fc}\u{df} \u{20ac} \u{2026} \u{201c}\u{201d} \u{2192} \u{b7}",
+        "\u{200b}\u{200e}\u{2028}\u{2029}\u{feff}",
+        "\u{3000}\u{1680}\u{2003}",
+        "\u{1f600}\u{10ffff}\u{e000}",
+        "/path/with spaces/and 'quotes'.exe",
+        " \t\u{1c}\u{1d}\u{1e}\u{1f}\u{85}\u{a0} padded \u{2000}\u{3000}\n",
+        "a\u{b}b\u{c}c\u{1c}d\u{1d}e\u{1e}f\u{85}g\u{2028}h\u{2029}i\r\nj\rk\n",
+        "  two  words ",
+        "12",
+        " 12 ",
+        "+7",
+        "-0",
+        "1_000",
+        "_1",
+        "1__0",
+        "1_",
+        "0x10",
+        "1.5",
+        "١٢",
+        "twelve",
+        "99999999999999999999999",
+    ];
+    let python = lab.python_eval(
+        "def number(text):\n    try:\n        return int(text)\n    except ValueError as error:\n        return str(error)\nresult = [[repr(text), text.strip(), text.split(), text.splitlines(), number(text)] for text in argument]",
+        &json!(texts),
+    );
+    for (text, expected) in texts.iter().zip(python.as_array().unwrap()) {
+        assert_eq!(
+            json!(fenix_patch::error::repr(text)),
+            expected[0],
+            "repr of {text:?}"
+        );
+        assert_eq!(
+            json!(fenix_patch::py::strip(text)),
+            expected[1],
+            "strip of {text:?}"
+        );
+        assert_eq!(
+            json!(fenix_patch::py::split(text)),
+            expected[2],
+            "split of {text:?}"
+        );
+        assert_eq!(
+            json!(fenix_patch::py::splitlines(text)),
+            expected[3],
+            "splitlines of {text:?}"
+        );
+        let number = match fenix_patch::py::int(text) {
+            // Beyond 64 bits the port only keeps "very large"; nothing it converts is that long.
+            Ok(i64::MAX) => expected[4].clone(),
+            Ok(number) => json!(number),
+            Err(error) => json!(error.to_string()),
+        };
+        // Python also reads the digits of other scripts; the port reads ASCII digits.
+        if *text != "١٢" {
+            assert_eq!(number, expected[4], "int of {text:?}");
+        }
+    }
+    let paths = [
+        "",
+        ".",
+        "./",
+        "a",
+        "a/",
+        "a//b",
+        "a/./b",
+        "./a",
+        "a/..",
+        "../a",
+        "/",
+        "/a/../b/",
+        "a/b/.",
+        "~",
+        "~/x",
+        "~/",
+        "~root/x",
+        "~nobody-here/x",
+        "a/~/b",
+        ".exe",
+        "a.exe",
+        "a.EXE",
+        "a.",
+        "a.tar.xz",
+        "..exe",
+        "...",
+        "a..b",
+    ];
+    let python = lab.python_eval(
+        "import os\nresult = [[str(Path(text)), Path(text).name, str(Path(text).parent), Path(text).suffix, str(Path(text).expanduser()) if text != '~nobody-here/x' else text] for text in argument]",
+        &json!(paths),
+    );
+    let home = lab
+        .environment(Side::Python, &Options::default())
+        .into_iter()
+        .find(|(name, _)| name == "HOME")
+        .map(|(_, value)| OsString::from(value));
+    for (text, expected) in paths.iter().zip(python.as_array().unwrap()) {
+        let path = fsx::path(text);
+        assert_eq!(
+            json!(path.display().to_string()),
+            expected[0],
+            "Path({text:?})"
+        );
+        assert_eq!(json!(fsx::name(&path)), expected[1], "name of {text:?}");
+        assert_eq!(
+            json!(fsx::parent(&path).display().to_string()),
+            expected[2],
+            "parent of {text:?}"
+        );
+        assert_eq!(
+            json!(fsx::suffix(&fsx::name(&path))),
+            expected[3],
+            "suffix of {text:?}"
+        );
+        assert_eq!(
+            json!(fsx::expanduser(text, home.clone()).display().to_string()),
+            expected[4],
+            "expanduser of {text:?}"
+        );
+    }
+}
+
+#[test]
+fn registry_and_library_reading() {
+    let Some(lab) = Lab::new() else { return };
+    let section = "[Software\\\\Microsoft\\\\NET Framework Setup\\\\NDP\\\\v4\\\\Full]";
+    let registries = [
+        format!("{section} 1700000000\n\"Release\"=dword:00080ff4\n"),
+        format!("{section} 1700000000\n\"Release\"=dword:00080EA8\n"),
+        format!("{section} 1700000000\n\"Release\"=dword:00080ea7\n"),
+        format!("{section}\r\n\"Install\"=dword:00000001\r\n\"Release\"=dword:00080ff4\r\n"),
+        format!("{section}\n\"Release\"=dword:ffffffffffffffffffffffffffffffffffffffff\n"),
+        format!("{section}\n\"Release\"=\"528372\"\n"),
+        format!("{section}\n\"Version\"=\"4.8\"\n\n[Other]\n\"Release\"=dword:00080ff4\n"),
+        format!("[Other]\n\"Release\"=dword:00080ff4\n\n{section}\n\"Release\"=dword:00000001\n\n{section}\n\"Release\"=dword:00080ff4\n"),
+        format!("{}\n\"Release\"=dword:00080ff4\n", section.to_lowercase()),
+        format!("prefix {section} suffix \"Release\"=dword:00080ff4"),
+        "[Software\\\\Microsoft\\\\NET Framework Setup\\\\NDP\\\\v4\\\\Client]\n\"Release\"=dword:00080ff4\n".to_string(),
+        String::new(),
+    ];
+    let fonts = "[Software\\\\Microsoft\\\\Windows NT\\\\CurrentVersion\\\\Fonts]";
+    let font_registries = [
+        format!(
+            "{fonts} 1\n\"Tahoma (TrueType)\"=\"tahoma.ttf\"\n\"Tahoma Bold (TrueType)\"=\"tahomabd.ttf\"\n"
+        ),
+        format!(
+            "{fonts} 1\r\n\"Tahoma (TrueType)\"=\"tahoma.ttf\"\r\n\"Tahoma Bold (TrueType)\"=\"\"\r\n"
+        ),
+        format!(
+            "{fonts} 1\n \"Tahoma (TrueType)\"=\"indented.ttf\"\n\"Tahoma Bold (TrueType)\"=\"unterminated\n"
+        ),
+        format!(" {fonts} 1\n\"Tahoma (TrueType)\"=\"section is indented\"\n"),
+        format!(
+            "{fonts} 1\n\"Arial (TrueType)\"=\"arial.ttf\"\n\n[Next]\n\"Tahoma (TrueType)\"=\"other section\"\n"
+        ),
+        format!(
+            "{fonts} 1\n\"Tahoma (TrueType)\"=\"a\"x\n\"Tahoma Bold (TrueType)\"=\"b\rc\"\n\"tahoma (truetype)\"=\"lower\"\n"
+        ),
+        "[Software\\\\Wow6432Node\\\\Microsoft\\\\Windows NT\\\\CurrentVersion\\\\Fonts]\n\"Tahoma (TrueType)\"=\"x\"\n"
+            .to_string(),
+        "no fonts at all".to_string(),
+    ];
+    lab.both(|base| {
+        for (number, registry) in registries.iter().enumerate() {
+            let prefix = base.join(format!("world/registry/{number:02}"));
+            put(&prefix.join("system.reg"), registry);
+            if number != 1 {
+                put(&prefix.join("drive_c/windows/Microsoft.NET/Framework64/v4.0.30319/clr.dll"), "clr");
+            }
+        }
+        fs::create_dir_all(base.join("world/registry/none")).unwrap();
+        fs::create_dir_all(base.join("world/registry/directory/system.reg")).unwrap();
+        fs::create_dir_all(base.join("world/registry/link")).unwrap();
+        symlink("../00/system.reg", base.join("world/registry/link/system.reg")).unwrap();
+        for (number, registry) in font_registries.iter().enumerate() {
+            let prefix = base.join(format!("world/fonts/{number:02}"));
+            put(&prefix.join("system.reg"), registry);
+            put(&prefix.join("drive_c/windows/Fonts/tahoma.ttf"), "the user's own");
+        }
+        put(&base.join("world/font runner/files/share/wine/fonts/tahoma.ttf"), "runner tahoma");
+        put(&base.join("world/font runner/files/share/wine/fonts/tahomabd.ttf"), "runner tahoma bold");
+        // Steam libraries, as its own file lists them.
+        for library in ["lib one", "lib \"quoted\"", "lib back\\slash"] {
+            fs::create_dir_all(base.join("world/libraries").join(library).join("steamapps")).unwrap();
+        }
+        fs::create_dir_all(base.join("world/libraries/no steamapps")).unwrap();
+        let at = |name: &str| base.join("world/libraries").join(name).display().to_string().replace('\\', "\\\\").replace('"', "\\\"");
+        put(
+            &base.join("world/libraries/root/steamapps/libraryfolders.vdf"),
+            &format!(
+                "\"libraryfolders\"\n{{\n\t\"0\"\n\t{{\n\t\t\"path\"\t\t\"{}\"\n\t}}\n\t\"1\" {{ \"PATH\" \"{}\" }}\n\t\"2\" {{ \"path\"\n\"{}\" }}\n\t\"3\" {{ \"path\" \"{}\" \"path\"\u{a0}\u{1c}\"{}\" }}\n\t\"4\" {{ \"path\" \"world/libraries/not found from here\" \"path\" \"{}\" \"path\"\"{}\" }}\n\t\"5\" {{ \"path\" \"{}/\" \"path\" \"\" }}\n}}\n",
+                at("lib one"),
+                at("lib one"),
+                at("lib \"quoted\""),
+                at("lib back\\slash"),
+                at("lib one"),
+                at("no steamapps"),
+                at("missing"),
+                at("root"),
+            ),
+        );
+        settle(&base.join("world"));
+    });
+    let script = format!(
+        "{PYTHON_OUTCOME}from unittest.mock import Mock\nframework = [outcome(lambda: core.has_framework(Path('world/registry').resolve() / name)) for name in argument[0]]\nfonts = []\nfor number in range(argument[1]):\n    wine = Mock()\n    prefix = Path('world/fonts/%02d' % number).resolve()\n    done = outcome(lambda: core.ensure_ui_fonts(prefix, Path('world/font runner').resolve(), wine))\n    fonts.append([done, [list(call.args) for call in wine.run.call_args_list]])\nresult = [framework, fonts, outcome(lambda: [str(path) for path in steam.libraries(Path('world/libraries/root').resolve())]), outcome(lambda: [str(path) for path in steam.libraries(Path('world/libraries/lib one').resolve())])]"
+    );
+    let names: Vec<String> = (0..registries.len())
+        .map(|number| format!("{number:02}"))
+        .chain(["none", "directory", "link"].map(str::to_string))
+        .collect();
+    let python = lab.python_eval(&script, &json!([names, font_registries.len()]));
+    let base = lab.base(Side::Rust);
+    let mut rust_framework = Vec::new();
+    for name in &names {
+        rust_framework.push(outcome(core::has_framework(
+            &base.join("world/registry").join(name),
+        )));
+    }
+    assert_eq!(
+        lab.normal(Side::Rust, &json::dumps(&json!(rust_framework), Some(1))),
+        lab.normal(Side::Python, &json::dumps(&python[0], Some(1)))
+    );
+    let mut rust_fonts = Vec::new();
+    for number in 0..font_registries.len() {
+        let recorder = Recorder::default();
+        let wine = RecordingWine {
+            prefix: base.join(format!("world/fonts/{number:02}")),
+            runner: base.join("world/font runner"),
+            env: Default::default(),
+            calls: &recorder,
+        };
+        let done = outcome(
+            core::ensure_ui_fonts(wine.prefix(), wine.runner(), &wine).map(|()| Value::Null),
+        );
+        rust_fonts.push(json!([done, recorder.0.lock().unwrap().clone()]));
+    }
+    assert_eq!(
+        lab.normal(Side::Rust, &json::dumps(&json!(rust_fonts), Some(1))),
+        lab.normal(Side::Python, &json::dumps(&python[1], Some(1)))
+    );
+    let libraries = |root: &str| {
+        outcome(steam::libraries(&base.join(root)).map(|found| {
+            json!(
+                found
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect::<Vec<_>>()
+            )
+        }))
+    };
+    assert_eq!(
+        lab.normal(Side::Rust, &libraries("world/libraries/root").to_string()),
+        lab.normal(Side::Python, &python[2].to_string())
+    );
+    assert_eq!(
+        lab.normal(
+            Side::Rust,
+            &libraries("world/libraries/lib one").to_string()
+        ),
+        lab.normal(Side::Python, &python[3].to_string())
+    );
+    assert!(python[2][1].as_array().unwrap().len() >= 4, "{}", python[2]);
+    let mut lab = lab;
+    lab.same_trees("fonts copied for the registry");
+    lab.finish();
+}
+
+/// Records the commands given to Wine, like `unittest.mock.Mock()` in the Python tests.
+#[derive(Default)]
+struct Recorder(std::sync::Mutex<Vec<Vec<String>>>);
+
+struct RecordingWine<'a> {
+    prefix: PathBuf,
+    runner: PathBuf,
+    env: fenix_patch::process::Env,
+    calls: &'a Recorder,
+}
+
+impl Wine for RecordingWine<'_> {
+    fn prefix(&self) -> &Path {
+        &self.prefix
+    }
+
+    fn runner(&self) -> &Path {
+        &self.runner
+    }
+
+    fn env(&self) -> &fenix_patch::process::Env {
+        &self.env
+    }
+
+    fn run(&self, args: &[OsString], _options: &core::RunOptions<'_>) -> Result<()> {
+        self.calls.0.lock().unwrap().push(
+            args.iter()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect(),
+        );
+        Ok(())
+    }
+
+    fn stop(&self) -> Result<()> {
+        Ok(())
+    }
+}
