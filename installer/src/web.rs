@@ -35,6 +35,8 @@ const MAX_BODY: i64 = 65536;
 struct Shared {
     index: usize,
     busy: Option<String>,
+    /// When the running step started and where its lines begin in the log.
+    since: Option<(Instant, usize)>,
     log: Vec<String>,
     error: Option<String>,
     view: Option<Value>,
@@ -66,6 +68,7 @@ impl Session {
             shared: Mutex::new(Shared {
                 index: 0,
                 busy: None,
+                since: None,
                 log: Vec::new(),
                 error: None,
                 view: None,
@@ -148,6 +151,17 @@ impl Session {
             "log".into(),
             json!(shared.log[shared.log.len().saturating_sub(200)..]),
         );
+        // What the running step has reported so far, and for how long it runs.
+        state.insert(
+            "activity".into(),
+            match shared.since.filter(|_| shared.busy.is_some()) {
+                Some((started, first)) => json!({
+                    "seconds": started.elapsed().as_secs(),
+                    "steps": shared.log[first.min(shared.log.len())..],
+                }),
+                None => Value::Null,
+            },
+        );
         state.insert("error".into(), json!(shared.error));
         state.insert("view".into(), shared.view.clone().unwrap_or(Value::Null));
         drop(shared);
@@ -173,6 +187,7 @@ impl Session {
                 return Err(Error::patch("Another step is still running."));
             }
             shared.busy = Some(action.to_string());
+            shared.since = Some((Instant::now(), shared.log.len()));
             shared.error = None;
             self.found.get(shared.index).cloned()
         };

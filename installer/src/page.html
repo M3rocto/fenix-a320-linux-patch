@@ -34,9 +34,15 @@ button.primary { background:var(--accent); border-color:var(--accent); color:var
 button.link { border:none; background:none; color:var(--accent); padding:0; font-size:14px; }
 button:disabled { opacity:.55; cursor:default; }
 .progress { display:flex; gap:10px; align-items:center; color:var(--muted); }
+.bar { height:6px; border-radius:3px; background:var(--line); overflow:hidden; margin:0 0 10px; }
+.bar span { display:block; width:35%; height:100%; border-radius:3px; background:var(--accent); animation:slide 1.6s ease-in-out infinite; }
+@keyframes slide { 0% { margin-left:-35%; } 100% { margin-left:100%; } }
+.sub-steps { list-style:none; margin:0 0 10px; padding:0; color:var(--muted); font-size:14px; }
+.sub-steps li::before { content:"✓ "; color:var(--ok); }
+.time { margin-left:auto; font-variant-numeric:tabular-nums; }
 .spin { width:16px; height:16px; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:spin 1s linear infinite; flex:none; }
 @keyframes spin { to { transform:rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .spin { animation:none; } }
+@media (prefers-reduced-motion: reduce) { .spin { animation:none; } .bar span { animation:none; width:100%; opacity:.5; } }
 details { margin:18px 0; } summary { cursor:pointer; color:var(--muted); }
 pre { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px; white-space:pre-wrap; overflow-wrap:anywhere; max-height:260px; overflow:auto; font-size:13px; margin:8px 0 0; }
 footer { display:flex; gap:8px; flex-wrap:wrap; margin-top:20px; }
@@ -115,8 +121,15 @@ function render() {
         step.done && !busy && ["installer", "open", "configure"].includes(step.id)
           ? el("button", {class: "link", onclick: () => step.needs_file ? redo(step) : run(step.id)}, "Run again") : null));
     if (running) {
-      item.append(el("div", {class: "body"}, el("div", {class: "progress", role: "status"}, el("span", {class: "spin"}),
-        el("span", {}, state.log[state.log.length - 1] || "Working …"))));
+      // What this step has finished, what it is doing now and for how long.
+      // How long the rest takes is not known, so the bar shows activity only.
+      const reported = (state.activity && state.activity.steps) || [];
+      item.append(el("div", {class: "body"},
+        el("div", {class: "bar", "aria-hidden": "true"}, el("span", {})),
+        reported.length > 1 ? el("ul", {class: "sub-steps"}, ...reported.slice(0, -1).map(line => el("li", {}, line))) : null,
+        el("div", {class: "progress", role: "status"}, el("span", {class: "spin"}),
+          el("span", {}, reported[reported.length - 1] || "Working …"),
+          el("span", {class: "time", id: "time", "aria-label": "Time so far"}, clock()))));
     } else if ((current && !busy) || step.redo) {
       const body = el("div", {class: "body"}, el("p", {}, step.text));
       if (step.link) body.append(el("p", {}, el("a", {href: step.link, target: "_blank", rel: "noreferrer"}, "Open your Fenix account")));
@@ -137,6 +150,15 @@ function render() {
   footer.push(el("button", {disabled: !!busy, onclick: quit}, "Close installer"));
   $("footer").replaceChildren(...footer);
 }
+function clock() {
+  const seconds = (state && state.activity && state.activity.seconds) || 0;
+  return Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0");
+}
+// The time changes with every poll; everything else is compared without it,
+// so that a running step is not rebuilt, and its bar not restarted, each time.
+function comparable(value) {
+  return JSON.stringify(value, (key, item) => key === "seconds" ? undefined : item);
+}
 let redoStep = null;
 function redo(step) { redoStep = step.id; for (const item of state.view.steps) item.redo = item.id === redoStep; render(); }
 async function quit() {
@@ -151,9 +173,9 @@ async function refresh() {
     const next = await response.json();
     if (next.view && redoStep) for (const step of next.view.steps) step.redo = step.id === redoStep && !next.busy;
     if (next.busy) redoStep = null;
-    const changed = JSON.stringify(next) !== JSON.stringify(state);
+    const changed = comparable(next) !== comparable(state);
     state = next;
-    if (changed) render();
+    if (changed) render(); else if ($("time")) $("time").textContent = clock();
   } catch (error) {
     $("banner").replaceChildren(el("div", {class: "banner err"}, "The installer is no longer running. Start ./install.sh again."));
   }

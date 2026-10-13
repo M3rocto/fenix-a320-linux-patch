@@ -1,3 +1,10 @@
+# Unreleased
+
+* The guided setup shows what a running step has finished, what it is doing
+  now and for how long: an activity bar, the completed sub-steps and the
+  elapsed time, instead of only the latest message. How long the rest takes is
+  not known, so the bar shows activity, not a percentage.
+
 # 0.1.0-preview.7 — 13 October 2026
 
 The installer is now one self-contained program instead of a Python package.

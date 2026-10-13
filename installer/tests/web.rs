@@ -277,8 +277,24 @@ fn one_step_runs_at_a_time_and_errors_are_shown() {
         400
     );
     assert_eq!(web.post("/secret/api/quit", json!({})), 400);
+    // The page shows what the running step has reported and for how long it runs.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let activity = loop {
+        let activity = web.state()["activity"].clone();
+        if activity["steps"] == json!(["working"]) || std::time::Instant::now() > deadline {
+            break activity;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    assert_eq!(activity["steps"], json!(["working"]));
+    assert!(
+        activity["seconds"]
+            .as_u64()
+            .is_some_and(|seconds| seconds < 5)
+    );
     web.target.release();
     web.wait_idle();
+    assert_eq!(web.state()["activity"], Value::Null);
     let state = web.state();
     assert_eq!(
         (
