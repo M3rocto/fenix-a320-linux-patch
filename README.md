@@ -10,6 +10,9 @@ This packages the Wine fixes tested with Fenix **2.4.0.4720**, MSFS 2024
 FCU and radio display rendering were checked in a running cockpit. A complete
 flight and other Fenix versions have not been independently validated.
 
+**Preview.7** replaces the Python installer with a single program that needs
+no runtime. The Wine overlays and helpers are the preview.6 files, unchanged.
+
 **Preview.5** adds the standalone Steam installation with a guided setup and an
 overlay for CachyOS Proton 11.0 (20261005), next to the overlays for Proton
 Experimental 11.0 (20260924) and CachyOS Proton 10.0 sunset. Their loader, memory,
@@ -59,9 +62,9 @@ opening a terminal. It downloads a pinned, checksummed patch release. Login and
 activation remain in the official Fenix software.
 
 Requirements: x86_64 Linux, glibc **2.38+**, GNU `cp`, and
-one of the exact Xodus/Proton builds pinned in `bundle.json`. From the release
-after preview.6 on, the installer is a single self-contained program and needs
-no Python or other runtime; preview.6 and earlier need Python 3.10+. The guided
+one of the exact Xodus/Proton builds pinned in `bundle.json`. From preview.7
+on, the installer is a single self-contained program and needs no Python or
+other runtime; preview.6 and earlier need Python 3.10+. The guided
 setup uses your web browser and needs no additional packages. The Microsoft Framework and geometry
 downloads need internet access. The official Fenix Installer handles its
 WebView2, .NET Desktop Runtime and Visual C++ prerequisites.
@@ -96,9 +99,9 @@ geometry dependency, copies the existing runner's fonts and graphics dependencie
 and installs the compatibility overlay after the staging Wine session exits. It retains the
 original runner, profile and launch scripts. An interrupted installation has a
 recovery journal. Repeating an already completed installation verifies its files.
-Running `install` from preview.6 also updates verified preview.1–preview.5 installations,
+Running `install` from preview.7 also updates verified preview.1–preview.6 installations,
 retaining installed aircraft, settings and the original restore point. On Steam it
-replaces the overlay of a preview.5 installation in place. Flightdeck
+replaces the overlay of a preview.5 or preview.6 installation in place. Flightdeck
 performs that update before opening Fenix applications when needed.
 
 `restore` restores the profile from before the patch and retains the newer

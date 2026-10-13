@@ -53,8 +53,8 @@ Grenzen: [steam.md](steam.md).
    und die Einstellung erneut anwenden.
 
 Du benötigst die gekaufte Fenix-Lizenz, glibc 2.38+, GNU `cp` und einen
-Webbrowser für die geführte Einrichtung. Ab dem Release nach preview.6 bringt
-das Installationsprogramm alles mit; preview.6 und älter brauchen noch
+Webbrowser für die geführte Einrichtung. Ab preview.7 bringt das
+Installationsprogramm alles mit; preview.6 und älter brauchen noch
 Python 3.10+. Keine Root-Rechte nötig.
 
 Getestet: Fenix 2.4.0.4720, MSFS 2024 1.8.16.0, Xodus Wine 11.0 und Hyprland.

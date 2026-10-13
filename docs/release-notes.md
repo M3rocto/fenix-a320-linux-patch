@@ -1,3 +1,35 @@
+# 0.1.0-preview.7 — 13 October 2026
+
+The installer is now one self-contained program instead of a Python package.
+The Wine overlays, helpers and patches are the preview.6 files, byte for byte;
+nothing changes in the simulator. Installations of preview.1 to preview.6 are
+updated as before, without reinstalling Fenix.
+
+* `./install.sh` starts the program `fenix-patch` that the ZIP contains. It is
+  statically linked and needs no Python, no other runtime and no system
+  library. Commands, options, messages and exit codes are those of the Python
+  installer. The guided setup in the browser is unchanged.
+* The host still needs glibc 2.38 or newer and GNU `cp`, because the patched
+  Wine modules and the profile copy do; the installer checks this as before.
+* Compared with the Python installer on the same inputs: a complete
+  installation and restoration in a Flightdeck runtime with the pinned Xodus
+  runner and real Wine give the same output, state and files, apart from what
+  Wine and Microsoft's setup write differently on every run. Settings files
+  keep their namespace declarations, which the Python installer dropped.
+* A failure that the Python installer reported as a traceback is now an
+  ordinary message. Downloads verify against the bundled Mozilla root
+  certificates instead of the system's store; the pinned checksums are checked
+  as before.
+* The maintainer scripts are the tool `fenix-tools` (`build`, `build-proton`,
+  `smoke`, `release`); see BUILDING.md. The smoke check passes on the Xodus
+  runner, CachyOS Proton 10 and CachyOS Proton 11 with the unchanged overlays.
+* The release contains the licence texts of the Rust crates linked into the
+  installer under `licenses/rust/`.
+* Three launch scripts for Flightdeck's Python releases 0.1.x stay in the
+  bundle unchanged; Flightdeck verifies two of them by hash.
+
+Not verified: the Steam path with a real Steam simulator, as before.
+
 # 0.1.0-preview.6 — 12 October 2026
 
 Fixes the Steam start failure of preview.5. In every overlay exactly one file
