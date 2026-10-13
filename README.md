@@ -43,23 +43,18 @@ with Fenix is untested. See [Steam details and limits](docs/steam.md).
 
 ## Install in Flightdeck
 
-1. Install and run MSFS 2024 once using Flightdeck. Close the simulator and Fenix.
-2. Download and extract the **Linux installer ZIP** from
-   [Releases](https://github.com/marselnenaj/fenix-a320-linux-patch/releases).
-3. Run `./install.sh` inside the extracted folder and choose the Flightdeck
-   simulator in the guided setup, then **Install patch**. No `sudo` is needed.
-4. Download the official Fenix Installer from your
-   [Fenix account](https://fenixsim.com/dashboard/). Choose **Run Fenix
-   Installer**, complete its prerequisites and aircraft installation, then close it.
-5. Choose **Open Fenix**. Sign in and activate your purchased aircraft normally,
-   then close Fenix and its helpers.
-6. Choose **Apply settings** (CPU displays + Legacy readouts). Launch MSFS through Flightdeck.
-   If Fenix has not created its readout settings yet, the setup asks you to
-   load the aircraft once and apply the setting again.
+Use Flightdeck's **Add-ons → Fenix A320** panel. It downloads the pinned,
+checksummed patch release, installs it with Flightdeck's own code and leads
+through the same steps: install the patch, run the official Fenix Installer
+from your [Fenix account](https://fenixsim.com/dashboard/), open Fenix and sign
+in, apply the settings (CPU displays and Legacy readouts). Login and activation
+remain in the official Fenix software.
 
-Flightdeck's **Add-ons → Fenix A320** panel provides the same workflow without
-opening a terminal. It downloads a pinned, checksummed patch release. Login and
-activation remain in the official Fenix software.
+`./install.sh` from this ZIP does not install into a runtime of current
+Flightdeck: it only replaces launch scripts it knows, those of Flightdeck's
+Python releases up to 0.1.21, and refuses others with *Custom Flightdeck launch
+script detected*. For such an older runtime it works as on Steam: choose the
+Flightdeck simulator in the guided setup, or pass `--runtime` as shown below.
 
 Requirements: x86_64 Linux, glibc **2.38+**, GNU `cp`, and
 one of the exact Xodus/Proton builds pinned in `bundle.json`. From preview.7
@@ -85,6 +80,7 @@ finds. `--steam msfs2020|msfs2024` takes the same commands as `--runtime`.
 ./install.sh targets
 ./install.sh install --steam msfs2024
 ./install.sh select --steam msfs2024      # with Steam closed
+# A runtime of Flightdeck's Python releases; current Flightdeck uses its Add-ons panel.
 ./install.sh status --runtime /path/to/flightdeck/runtime
 ./install.sh install --runtime /path/to/flightdeck/runtime
 ./install.sh installer --runtime /path/to/flightdeck/runtime --exe "$HOME/Downloads/FenixInstaller.exe"

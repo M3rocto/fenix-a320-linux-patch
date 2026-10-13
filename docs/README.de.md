@@ -22,10 +22,13 @@ Fenix ist ungetestet.
    Legacy-FCU-Anzeigen erst nach dem ersten Laden des Flugzeugs an, folgt dafür
    ein weiterer Schritt.
 
-Ein vorhandenes preview.5 aktualisiert **Patch aktualisieren** an Ort und
-Stelle: Profil, Fenix, Anmeldung und Einstellungen bleiben erhalten. preview.5
-startete den Simulator aus Steam nicht, weil eine Bibliothek im
-Steam-Container fehlte.
+Eine frühere Installation (preview.5 oder preview.6) aktualisiert **Patch
+aktualisieren** an Ort und Stelle: Profil, Fenix, Anmeldung und Einstellungen
+bleiben erhalten. preview.5 startete den Simulator aus Steam nicht, weil eine
+Bibliothek im Steam-Container fehlte.
+
+Seit preview.7 ist der Installer ein einzelnes Programm ohne Python. Die
+Wine-Module und Helfer sind unverändert die von preview.6.
 
 Der Installer legt das eigene Proton an, weil Steam Proton Experimental laufend
 aktualisiert und die Korrekturen zu genau einem Wine-Stand gehören. Andere
@@ -39,18 +42,25 @@ Grenzen: [steam.md](steam.md).
 
 ## Flightdeck (MSFS 2024)
 
-1. MSFS einmal mit Flightdeck starten und danach Simulator und Fenix schließen.
-2. Das Linux-Installer-ZIP aus den GitHub-Releases entpacken und `./install.sh`
-   starten. Alternativ Flightdeck → Add-ons → Fenix A320 öffnen.
-3. Patch einrichten. Der Installer sichert das Windows-Profil, erstellt eine
+In Flightdeck **Add-ons → Fenix A320** öffnen. Flightdeck lädt die festgelegte,
+geprüfte Patch-Version, richtet sie mit eigenem Code ein und führt durch
+dieselben Schritte:
+
+1. Patch einrichten. Flightdeck sichert das Windows-Profil, erstellt eine
    eigene Runner-Kopie und installiert bei Bedarf Microsoft .NET Framework 4.8
    sowie die geprüfte Geometrie-Abhängigkeit für die Routenanzeige.
-4. Den offiziellen Fenix-Installer aus dem eigenen Fenix-Konto auswählen und
+2. Den offiziellen Fenix-Installer aus dem eigenen Fenix-Konto auswählen und
    die normale Installation einschließlich der angebotenen Voraussetzungen abschließen.
-5. Fenix öffnen, anmelden und aktivieren. Anschließend Fenix samt Helfern schließen.
-6. CPU-Anzeigen und Legacy-Readouts anwenden. Danach MSFS über Flightdeck starten.
+3. Fenix öffnen, anmelden und aktivieren. Anschließend Fenix samt Helfern schließen.
+4. CPU-Anzeigen und Legacy-Readouts anwenden. Danach MSFS über Flightdeck starten.
    Fehlen die Readout-Einstellungen von Fenix noch, das Flugzeug einmal laden
    und die Einstellung erneut anwenden.
+
+`./install.sh` aus diesem ZIP richtet eine Runtime des aktuellen Flightdeck
+nicht ein: Es ersetzt nur Startskripte, die es kennt, nämlich die der
+Flightdeck-Python-Versionen bis 0.1.21, und lehnt andere mit *Custom Flightdeck
+launch script detected* ab. Für eine solche ältere Runtime funktioniert es wie
+bei Steam.
 
 Du benötigst die gekaufte Fenix-Lizenz, glibc 2.38+, GNU `cp` und einen
 Webbrowser für die geführte Einrichtung. Ab preview.7 bringt das
