@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-//! `fenix-tools build`: rebuild the Wine modules from the exact archived
+//! `fenix-tools build`: rebuild the Wine and DXGI modules from the exact archived
 //! sources and patches.
 use crate::{Context, archive::extract, util};
 use fenix_patch::{
@@ -12,7 +12,7 @@ use std::{
     fs::OpenOptions,
     io::Write,
     os::unix::fs::OpenOptionsExt,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
 /// What `make` builds, and where each module belongs in a runner.
@@ -56,6 +56,34 @@ pub const TARGETS: [(&str, &str); 11] = [
         "files/lib/wine/x86_64-unix/winex11.so",
     ),
 ];
+
+/// These ABI partners accompany the shared-resource owner-adapter patch.
+/// Legacy overlays without a pinned DXVK build retain their original targets.
+pub const GPU_TARGETS: [(&str, &str); 3] = [
+    (
+        "dlls/gdi32/x86_64-windows/gdi32.dll",
+        "files/lib/wine/x86_64-windows/gdi32.dll",
+    ),
+    (
+        "dlls/win32u/x86_64-windows/win32u.dll",
+        "files/lib/wine/x86_64-windows/win32u.dll",
+    ),
+    (
+        "dlls/wow64win/x86_64-windows/wow64win.dll",
+        "files/lib/wine/x86_64-windows/wow64win.dll",
+    ),
+];
+
+pub const DXGI_TARGET: &str = "src/dxgi/dxgi.dll";
+pub const DXGI_FILE: &str = "files/lib/wine/dxvk/x86_64-windows/dxgi.dll";
+
+pub(crate) fn targets(entry: &Value) -> Vec<(&'static str, &'static str)> {
+    let mut selected = TARGETS.to_vec();
+    if entry.get("dxvk").is_some() {
+        selected.extend(GPU_TARGETS);
+    }
+    selected
+}
 
 // configure links ntdll.so against libunwind when the build host has it. The
 // pinned runners do not, and neither Steam Linux Runtime ships the library.
@@ -148,6 +176,7 @@ pub(crate) fn compile(
     flags: &OsString,
     jobs: i64,
     env: &Env,
+    targets: &[(&str, &str)],
 ) -> Result<()> {
     let run = |command: Vec<OsString>, cwd: &Path| ctx.call(command, env, Some(cwd));
     run(argv!["./tools/make_specfiles"].to_vec(), source)?;
@@ -176,8 +205,178 @@ pub(crate) fn compile(
     run(configure, output)?;
     run(argv![&ctx.programs.make, "depend"].to_vec(), output)?;
     let mut make = argv![&ctx.programs.make, format!("-j{jobs}")].to_vec();
-    make.extend(TARGETS.map(|(target, _)| OsString::from(target)));
+    make.extend(targets.iter().map(|(target, _)| OsString::from(target)));
     run(make, output)
+}
+
+fn revision(text: &str) -> bool {
+    text.len() == 40 && text.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+/// Check the pinned, recursively populated source tree. A GitHub codeload
+/// archive by itself is incomplete: it omits every Git submodule. The archive
+/// digest identifies their exact bytes; the pin table records their commits.
+fn check_dxvk_submodules(source: &Path, pins: &Map<String, Value>) -> Result<()> {
+    for (path, pin) in pins {
+        if path.is_empty()
+            || !Path::new(path)
+                .components()
+                .all(|part| matches!(part, Component::Normal(_)))
+            || !pin.as_str().is_some_and(revision)
+        {
+            return Err(value(&format!("Invalid DXVK submodule pin: {path}")));
+        }
+    }
+    let mut declared = Vec::new();
+    for base in std::iter::once(PathBuf::new()).chain(pins.keys().map(PathBuf::from)) {
+        let gitmodules = source.join(&base).join(".gitmodules");
+        if !gitmodules.is_file() {
+            continue;
+        }
+        for line in fsx::read_text(&gitmodules)?.lines() {
+            let Some((key, path)) = line.trim().split_once('=') else {
+                continue;
+            };
+            if key.trim() == "path" {
+                let path = base.join(path.trim());
+                declared.push(path.to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    for path in pins.keys() {
+        if !declared.contains(path) {
+            return Err(value(&format!("Invalid DXVK submodule pin: {path}")));
+        }
+        let directory = source.join(path);
+        if !directory.is_dir()
+            || fsx::sorted_dir(&directory)?.is_empty()
+            || !fsx::resolve(&directory)?.starts_with(fsx::resolve(source)?)
+        {
+            return Err(value(&format!("Missing DXVK submodule source: {path}")));
+        }
+    }
+    for path in declared {
+        if !pins.contains_key(&path) {
+            return Err(value(&format!("Unpinned DXVK submodule: {path}")));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn dxvk_source_name(entry: &Value) -> Result<Option<&str>> {
+    entry
+        .get("dxvk")
+        .map(|dxvk| dxvk.need_str("source"))
+        .transpose()
+}
+
+fn missing_dxvk_source(name: &str) -> Error {
+    value(&format!(
+        "Missing complete DXVK source archive: sources/{name}. Extract it from the matching release; GitHub codeload omits its pinned submodules."
+    ))
+}
+
+/// Extract and patch an optional same-version DXVK tree before either build
+/// enters its compiler steps. `--prepare-only` checks this source as well.
+pub(crate) fn prepare_dxvk(
+    ctx: &Context<'_>,
+    entry: &Value,
+    build: &Path,
+    env: &Env,
+) -> Result<Option<PathBuf>> {
+    let Some(dxvk) = entry.get("dxvk") else {
+        return Ok(None);
+    };
+    let commit = dxvk.need_str("revision")?;
+    if !revision(commit) || dxvk.need_str("source_root")? != format!("dxvk-{commit}") {
+        return Err(value("Invalid DXVK source revision/root"));
+    }
+    let name = dxvk.need_str("source")?;
+    let source_hashes = entry.need_table("sources")?;
+    let expected = source_hashes
+        .get(name)
+        .ok_or_else(|| value("DXVK source archive has no checksum in sources"))?;
+    let archive = ctx.root().join("sources").join(name);
+    if !archive.is_file() {
+        return Err(missing_dxvk_source(name));
+    }
+    if !json::is_text(expected, &fsx::digest(&archive)?) {
+        return Err(value(&format!("Source checksum mismatch: {name}")));
+    }
+    let source = build.join(dxvk.need_str("source_root")?);
+    extract(&archive, &source)?;
+    check_dxvk_submodules(&source, &dxvk.need_table("submodules")?)?;
+    for (name, expected) in &dxvk.need_table("patches")? {
+        let patch = ctx.root().join("patches").join(name);
+        if !json::is_text(expected, &fsx::digest(&patch)?) {
+            return Err(value(&format!("DXVK patch checksum mismatch: {name}")));
+        }
+        apply_patch(ctx, &patch, &source, env)?;
+    }
+    Ok(Some(source))
+}
+
+/// Build only DXGI, with Meson's downloads disabled. The original runner's
+/// D3D11 remains paired with this identical DXVK revision.
+pub(crate) fn compile_dxvk(
+    ctx: &Context<'_>,
+    source: &Path,
+    build: &Path,
+    prefix_maps: &OsString,
+    jobs: i64,
+    env: &Env,
+) -> Result<PathBuf> {
+    let output = build.join("dxvk-objects");
+    let mut dxvk_env = env.clone();
+    // vcs_tag must use the archive's fallback version, rather than discover
+    // the enclosing Fenix checkout (or an inherited Git worktree).
+    dxvk_env.set("GIT_CEILING_DIRECTORIES", build);
+    dxvk_env.set("SOURCE_DATE_EPOCH", "0");
+    for name in ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR"] {
+        dxvk_env.remove(name);
+    }
+    let mut cflags = OsString::from("-Dc_args=");
+    cflags.push(prefix_maps);
+    let mut cppflags = OsString::from("-Dcpp_args=");
+    cppflags.push(prefix_maps);
+    ctx.call(
+        argv![
+            &ctx.programs.meson,
+            "setup",
+            &output,
+            source,
+            "--cross-file",
+            source.join("build-win64.txt"),
+            "--buildtype=release",
+            "--wrap-mode=nodownload",
+            "--force-fallback-for=libdisplay-info",
+            "-Denable_dxgi=true",
+            "-Denable_d3d8=false",
+            "-Denable_d3d9=false",
+            "-Denable_d3d10=false",
+            "-Denable_d3d11=false",
+            "-Dc_link_args=-Wl,--no-insert-timestamp",
+            "-Dcpp_link_args=-Wl,--no-insert-timestamp",
+            cflags,
+            cppflags
+        ]
+        .to_vec(),
+        &dxvk_env,
+        Some(source),
+    )?;
+    ctx.call(
+        argv![
+            &ctx.programs.ninja,
+            "-C",
+            &output,
+            format!("-j{jobs}"),
+            DXGI_TARGET
+        ]
+        .to_vec(),
+        &dxvk_env,
+        Some(source),
+    )?;
+    Ok(output.join(DXGI_TARGET))
 }
 
 /// Copy one built module to `file` and remove its debugging information.
@@ -200,6 +399,20 @@ pub(crate) fn install_module(
         env,
         Some(source),
     )
+}
+
+/// GNU PE strip otherwise replaces the linker's zero timestamp with the
+/// current wall time, even when the input used --no-insert-timestamp.
+pub(crate) fn install_dxgi(
+    ctx: &Context<'_>,
+    built: &Path,
+    file: &Path,
+    source: &Path,
+    env: &Env,
+) -> Result<()> {
+    let mut reproducible = env.clone();
+    reproducible.set("SOURCE_DATE_EPOCH", "0");
+    install_module(ctx, built, file, source, &reproducible)
 }
 
 /// `{name: sha(base / name) for name in names}`.
@@ -234,6 +447,9 @@ pub fn run(ctx: &Context<'_>, options: &Options) -> Result<()> {
     for (name, expected) in &view.need_table("sources")? {
         let path = sources.join(name);
         if !fsx::exists(&path) {
+            if dxvk_source_name(&view)? == Some(name.as_str()) {
+                return Err(missing_dxvk_source(name));
+            }
             let (_, url) = urls
                 .iter()
                 .find(|(known, _)| known == name)
@@ -271,24 +487,38 @@ pub fn run(ctx: &Context<'_>, options: &Options) -> Result<()> {
         }
         apply_patch(ctx, &path, &source, &inherited)?;
     }
+    let dxvk = prepare_dxvk(ctx, &view, &build, &inherited)?;
     if options.prepare_only {
         return Ok(());
     }
     let mut env = inherited;
     env.set("XDG_CACHE_HOME", build.join("cache"));
     let output = build.join("objects");
-    let mut flags = OsString::from("-g -O2 -ffile-prefix-map=");
-    flags.push(root);
-    flags.push("=/usr/src/fenix-a320-linux-patch -ffile-prefix-map=");
-    flags.push(&build);
-    flags.push("=/usr/src/fenix-a320-linux-patch/build");
+    let mut prefix_maps = OsString::from("-ffile-prefix-map=");
+    prefix_maps.push(root);
+    prefix_maps.push("=/usr/src/fenix-a320-linux-patch -ffile-prefix-map=");
+    prefix_maps.push(&build);
+    prefix_maps.push("=/usr/src/fenix-a320-linux-patch/build");
+    let mut flags = OsString::from("-g -O2 ");
+    flags.push(&prefix_maps);
     // The protocol 931 generated header/trace are supplied by the patch. Do not
     // let make_requests increment the ABI used by the pinned 32-bit clients:
     // the build starts at make_specfiles.
-    compile(ctx, &source, &output, &flags, options.jobs, &env)?;
-    for (target, relative) in TARGETS {
+    let targets = targets(&view);
+    compile(ctx, &source, &output, &flags, options.jobs, &env, &targets)?;
+    for (target, relative) in targets {
         let file = root.join("payload").join(relative);
         install_module(ctx, &output.join(target), &file, &source, &env)?;
+    }
+    if let Some(dxvk) = dxvk {
+        let built = compile_dxvk(ctx, &dxvk, &build, &prefix_maps, options.jobs, &env)?;
+        install_dxgi(
+            ctx,
+            &built,
+            &root.join("payload").join(DXGI_FILE),
+            &dxvk,
+            &env,
+        )?;
     }
     let gcc = |arguments: &[OsString]| {
         let mut command = argv![&ctx.programs.mingw_gcc, "-Os", "-s", "-municode"].to_vec();
@@ -316,7 +546,19 @@ pub fn run(ctx: &Context<'_>, options: &Options) -> Result<()> {
         root.join("integration/FenixMCDURefresh.exe"),
         root.join("native/mcdu-refresh.c")
     ])?;
-    let current = digests(&root.join("payload"), &view.need_table("files")?)?;
+    let mut current = digests(&root.join("payload"), &view.need_table("files")?)?;
+    if view.get("dxvk").is_some() {
+        for relative in GPU_TARGETS
+            .map(|(_, relative)| relative)
+            .into_iter()
+            .chain([DXGI_FILE])
+        {
+            current.insert(
+                relative.to_string(),
+                Value::String(fsx::digest(&root.join("payload").join(relative))?),
+            );
+        }
+    }
     let integration = digests(&root.join("integration"), &view.need_table("integration")?)?;
     if options.record_build {
         let helper = |name: &str| {

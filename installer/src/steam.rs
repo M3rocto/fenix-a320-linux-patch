@@ -971,6 +971,7 @@ pub fn update(
     let variant = core::variant_name(state.need("variant")?)?;
     let lock = system.manifest(variant.as_deref())?;
     let version = lock.need("version")?.clone();
+    let renderer = core::DisplayRenderer::for_state(&lock, state, None)?;
     let installed = state.need("version")?.clone();
     let previous = lock
         .need("previous_releases")?
@@ -1017,12 +1018,24 @@ pub fn update(
     marker.insert("state".into(), json!("ready"));
     write_json(&tool.join(TOOL_MARKER), &Value::Object(marker))?;
     let mut updated = json::object(state.clone(), "The patch state")?;
+    let renderer_changed = core::DisplayRenderer::from_state(state) != renderer;
+    if renderer_changed {
+        let backup = item.state().join(format!("settings-{}", py::uuid4_hex()?));
+        fsx::mkdir(&backup, 0o700)?;
+        core::backup_settings(&item.prefix(), &backup)?;
+        progress("Updating the display renderer for this Proton build …")?;
+        core::apply_settings(&mut updated, &item.prefix(), item.settings(), renderer)?;
+    }
     updated.insert("version".into(), version);
     updated.insert("updated_from".into(), installed);
     let updated = Value::Object(updated);
     verify_installed(system, item, &updated)?;
     write_json(&item.marker(), &updated)?;
-    progress("Patch updated. The Windows profile, Fenix and its settings are unchanged.")
+    progress(if renderer_changed {
+        "Patch updated. Display settings now use the renderer supported by this Proton build."
+    } else {
+        "Patch updated. The Windows profile, Fenix and its settings are unchanged."
+    })
 }
 
 pub fn install(
@@ -1121,6 +1134,7 @@ pub fn install(
             create_tool(system, &source, &tool, Some(&variant))?;
             (tool, Some(variant))
         };
+        let renderer = core::DisplayRenderer::from_manifest(&system.manifest(variant.as_deref())?)?;
         save(&state)?;
         let _ = fs::remove_dir_all(work.join("proton"));
         progress("Copying the Windows profile; the original remains available …")?;
@@ -1165,7 +1179,7 @@ pub fn install(
                 )?;
                 progress("Preparing fonts, graphics dependencies and Fenix settings …")?;
                 system.graphics_and_fonts(&prefix, &tool, wine.as_ref())?;
-                core::apply_settings(&mut state, &prefix, item.settings())?;
+                core::apply_settings(&mut state, &prefix, item.settings(), renderer)?;
                 system.prepare_geometry(
                     wine.as_ref(),
                     &state_directory.join("downloads"),
@@ -1377,13 +1391,27 @@ pub fn installed_state(system: &dyn System, item: &Target) -> Result<Value> {
 }
 
 pub fn configure(system: &dyn System, item: &Target, progress: Progress<'_>) -> Result<()> {
+    configure_with_renderer(system, item, progress, None)
+}
+
+pub fn configure_with_renderer(
+    system: &dyn System,
+    item: &Target,
+    progress: Progress<'_>,
+    requested: Option<core::DisplayRenderer>,
+) -> Result<()> {
     let held = locked(system, item, true, false)?;
     let state = installed_state(system, item)?;
+    let lock = system.manifest(core::state_variant(&state)?.as_deref())?;
+    let renderer = core::DisplayRenderer::for_state(&lock, &state, requested)?;
     let backup = held.root.join(format!("settings-{}", py::uuid4_hex()?));
     fsx::mkdir(&backup, 0o700)?;
     core::backup_settings(&item.prefix(), &backup)?;
     let mut state = json::object(state, "The patch state")?;
-    let message = core::apply_settings(&mut state, &item.prefix(), item.settings())?;
+    let message = core::apply_settings(&mut state, &item.prefix(), item.settings(), renderer)?;
+    if let Some(renderer) = requested {
+        state.insert("display_renderer_override".into(), json!(renderer.as_str()));
+    }
     write_json(&item.marker(), &Value::Object(state.clone()))?;
     if state.get("configured") != Some(&Value::Bool(true)) {
         return Err(Error::patch(core::NEEDS_SIGN_IN));

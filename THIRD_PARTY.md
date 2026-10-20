@@ -16,8 +16,34 @@
   `2ce6b44caa66a56ec99c7826ae564c088abc1b9f`; unchanged source archive
   `sources/cachyos-11-wine.tar.gz`. All three retain Wine’s LGPL-2.1-or-later
   licensing and original per-file notices.
-* All modifications to these sources are in `patches/`, in manifest order.
-  The patches are LGPL-2.1-or-later. See `licenses/LGPL-2.1.txt`.
+* All modifications to these Wine sources are in `patches/`, in manifest order.
+  The Wine patches are LGPL-2.1-or-later. See `licenses/LGPL-2.1.txt`.
+* DXVK: https://github.com/doitsujin/dxvk at
+  `6227b633e8d528952873c4c146773663964fcb31` for Xodus,
+  `25ca63f17f34bdc05a39873ee63907d3cbbfa030` for the pinned Proton Experimental,
+  and `685301564ea3486a7098bd37194020da84299617` for CachyOS Wine 11;
+  zlib/libpng licence, reproduced
+  in `licenses/DXVK.txt`. The matching overlay redistributes a modified
+  `dxgi.dll` with the changes in `patches/dxvk-shared-resource-adapter.patch`
+  under the same licence. `sources/dxvk-6227b633e8d5289.tar.gz`,
+  `sources/dxvk-25ca63f17f34bdc.tar.gz` and
+  `sources/dxvk-685301564ea3486.tar.gz` contain the
+  original committed sources and all six original recursively pinned submodules,
+  with their copyright and licence notices intact:
+  * `include/native/directx`: Joshua-Ashton/mingw-directx-headers at
+    `9df86f2341616ef1888ae59919feaa6d4fad693d`.
+  * `include/spirv`: KhronosGroup/SPIRV-Headers at
+    `04f10f650d514df88b76d25e83db360142c7b174`.
+  * `include/vulkan`: KhronosGroup/Vulkan-Headers at
+    `8864cdc896bbc2a9b6eb36b3218fc9ef57908d77`.
+  * `subprojects/dxbc-spirv`: doitsujin/dxbc-spirv at
+    `c5c1a5b9b61773d59592f628faa39be9add26282` for Xodus,
+    `bf14419e5fa7eacb817b7b632f03cb61d61bbad7` for Proton Experimental, and
+    `c7f069701227dcb800a01bd93e42f8001b7543e7` for CachyOS Wine 11, MIT.
+  * `subprojects/dxbc-spirv/submodules/spirv_headers`: KhronosGroup/SPIRV-Headers at
+    `c8ad050fcb29e42a2f57d9f59e97488f465c436d`.
+  * `subprojects/libdisplay-info`: doitsujin/libdisplay-info at
+    `275e6459c7ab1ddd4b125f28d0440716e4888078`, MIT.
 * The selected-cursor sharing fix is backported from GloriousEggroll's
   [GE-Proton patch](https://github.com/GloriousEggroll/proton-ge-custom/commit/16a62e92).
   Its authorship and Wine's per-file notices are retained.
@@ -33,8 +59,10 @@
 
 The complete sources are in the same binary ZIP and in a separate corresponding
 source archive in each release. Build and relinking instructions are in BUILDING.md.
-The runner itself, its fonts, DXVK and vkd3d binaries are supplied by the user's
-Flightdeck or Proton installation and are not redistributed by this project.
+The runner itself, its fonts, D3D11 and vkd3d binaries are supplied by the user's
+Flightdeck or Proton installation. This project redistributes the modified
+same-revision DXGI only for overlays whose manifest includes its source and
+output pins; the runner's other graphics modules are retained.
 For Steam, the installer can download the unmodified CachyOS Proton build from
 its [GitHub release](https://github.com/CachyOS/proton-cachyos/releases); the
 URL and SHA-256 pin are in `installer/src/steam.rs`.

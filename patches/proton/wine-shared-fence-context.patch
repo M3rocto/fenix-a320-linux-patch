@@ -1,0 +1,1315 @@
+diff --git a/server/protocol.def b/server/protocol.def
+--- a/server/protocol.def
++++ b/server/protocol.def
+@@ -975,6 +975,8 @@
+ };
+ 
+ #define D3DKMT_RESOURCE_CREATE_ADAPTER_LUID 1
++#define D3DKMT_OBJECT_OPEN_CONTEXT_AWARE 0x40000000u
++#define D3DKMT_OBJECT_OPEN_CONTEXT 0x80000000u
+ 
+ enum d3dkmt_type
+ {
+diff --git a/include/wine/server_protocol.h b/include/wine/server_protocol.h
+--- a/include/wine/server_protocol.h
++++ b/include/wine/server_protocol.h
+@@ -954,6 +954,8 @@
+ };
+ 
+ #define D3DKMT_RESOURCE_CREATE_ADAPTER_LUID 1
++#define D3DKMT_OBJECT_OPEN_CONTEXT_AWARE 0x40000000u
++#define D3DKMT_OBJECT_OPEN_CONTEXT 0x80000000u
+ 
+ enum d3dkmt_type
+ {
+diff --git a/server/object.h b/server/object.h
+--- a/server/object.h
++++ b/server/object.h
+@@ -370,6 +370,7 @@
+ extern struct type_descr device_type;
+ extern struct type_descr completion_type;
+ extern struct type_descr file_type;
++extern struct object *get_mapping_object( struct process *process, obj_handle_t handle, unsigned int access );
+ extern struct type_descr mapping_type;
+ extern struct type_descr key_type;
+ extern struct type_descr apc_reserve_type;
+diff --git a/server/mapping.c b/server/mapping.c
+--- a/server/mapping.c
++++ b/server/mapping.c
+@@ -1210,6 +1210,11 @@
+     return (struct mapping *)get_handle_obj( process, handle, access, &mapping_ops );
+ }
+ 
++struct object *get_mapping_object( struct process *process, obj_handle_t handle, unsigned int access )
++{
++    return get_handle_obj( process, handle, access, &mapping_ops );
++}
++
+ /* open a new file for the file descriptor backing the view */
+ struct file *get_view_file( const struct memory_view *view, unsigned int access, unsigned int sharing )
+ {
+diff --git a/server/d3dkmt.c b/server/d3dkmt.c
+--- a/server/d3dkmt.c
++++ b/server/d3dkmt.c
+@@ -44,6 +44,7 @@
+     data_size_t         runtime_size;   /* size of client runtime data */
+     struct fd          *fd;             /* fd object for unix fds */
+     LUID                adapter_luid;   /* creating adapter, independent of runtime metadata */
++    struct object      *context;        /* optional shared synchronization state section */
+ };
+ 
+ static void d3dkmt_object_dump( struct object *obj, int verbose );
+@@ -395,6 +396,7 @@
+ 
+     if (object->global) free_object_handle( object->global );
+     if (object->fd) release_object( object->fd );
++    if (object->context) release_object( object->context );
+     free( object->runtime );
+ }
+ 
+@@ -407,6 +409,7 @@
+     object->global          = 0;
+     object->runtime_size    = runtime_size;
+     object->fd              = NULL;
++    object->context         = NULL;
+     memset( &object->adapter_luid, 0, sizeof(object->adapter_luid) );
+ 
+     if (!(object->runtime = memdup( runtime, runtime_size )) ||
+@@ -454,6 +457,7 @@
+     object->base.global          = 0;
+     object->base.runtime_size    = runtime_size;
+     object->base.fd              = NULL;
++    object->base.context         = NULL;
+     object->key_value            = key_value;
+     object->fence_value          = 0;
+     object->abandoned            = false;
+@@ -628,6 +632,17 @@
+         break;
+     }
+ 
++    if (req->type == D3DKMT_SYNC && req->value)
++    {
++        object->context = get_mapping_object( current->process, req->value,
++                                               SECTION_QUERY | SECTION_MAP_READ | SECTION_MAP_WRITE );
++        if (!object->context)
++        {
++            release_object( object );
++            goto done;
++        }
++    }
++
+     if (fd)
+     {
+         set_fd_user( fd, &d3dkmt_fd_ops, &object->obj );
+@@ -688,13 +703,51 @@
+ DECL_HANDLER(d3dkmt_object_open)
+ {
+     data_size_t runtime_size = get_reply_max_size();
++    unsigned int flags = req->type & (D3DKMT_OBJECT_OPEN_CONTEXT_AWARE | D3DKMT_OBJECT_OPEN_CONTEXT);
++    unsigned int type = req->type & ~(D3DKMT_OBJECT_OPEN_CONTEXT_AWARE | D3DKMT_OBJECT_OPEN_CONTEXT);
+     struct d3dkmt_object *object;
+     obj_handle_t handle;
+ 
+-    if (req->global) object = d3dkmt_object_open( req->global, req->type );
+-    else object = d3dkmt_object_open_shared( req->handle, req->type );
++    if ((flags && type != D3DKMT_SYNC) ||
++        ((flags & D3DKMT_OBJECT_OPEN_CONTEXT) && !(flags & D3DKMT_OBJECT_OPEN_CONTEXT_AWARE)))
++    {
++        set_error( STATUS_INVALID_PARAMETER );
++        return;
++    }
++    if (req->global) object = d3dkmt_object_open( req->global, type );
++    else object = d3dkmt_object_open_shared( req->handle, type );
+     if (!object) return;
+ 
++    /* Opening the process-shared mutex is a write operation. A query-only NT
++     * handle must not become a writable section through an aware import. KMT
++     * global handles retain their existing process-independent access model. */
++    if (object->context && flags && !req->global)
++    {
++        struct object *shared = get_handle_obj( current->process, req->handle,
++            DXGK_SHARED_SYNC_QUERY_STATE | DXGK_SHARED_SYNC_MODIFY_STATE, &dxgk_shared_sync_ops );
++        if (!shared)
++        {
++            release_object( object );
++            return;
++        }
++        release_object( shared );
++    }
++
++    /* Old clients interpret nonzero runtime metadata as a local pointer.
++     * They must never receive the new process-independent context metadata. */
++    if (object->context && !(flags & D3DKMT_OBJECT_OPEN_CONTEXT_AWARE))
++        set_error( STATUS_NOT_SUPPORTED );
++    else if (flags & D3DKMT_OBJECT_OPEN_CONTEXT)
++    {
++        if (!object->context || runtime_size) set_error( STATUS_INVALID_PARAMETER );
++        else reply->handle = alloc_handle( current->process, object->context,
++                                           SECTION_QUERY | SECTION_MAP_READ | SECTION_MAP_WRITE, 0 );
++    }
++    else goto ordinary_open;
++    release_object( object );
++    return;
++
++ordinary_open:
+     /* only resource objects require exact runtime buffer size match */
+     if (object->type != D3DKMT_RESOURCE && runtime_size > object->runtime_size) runtime_size = object->runtime_size;
+ 
+diff --git a/dlls/win32u/d3dkmt.c b/dlls/win32u/d3dkmt.c
+--- a/dlls/win32u/d3dkmt.c
++++ b/dlls/win32u/d3dkmt.c
+@@ -347,14 +347,14 @@
+     return status;
+ }
+ 
+-static NTSTATUS d3dkmt_object_open( struct d3dkmt_object *obj, D3DKMT_HANDLE global, HANDLE handle,
+-                                    void *runtime, UINT *runtime_size )
++static NTSTATUS d3dkmt_object_open_ex( struct d3dkmt_object *obj, D3DKMT_HANDLE global, HANDLE handle,
++                                       void *runtime, UINT *runtime_size, UINT flags )
+ {
+     NTSTATUS status;
+ 
+     SERVER_START_REQ( d3dkmt_object_open )
+     {
+-        req->type = obj->type;
++        req->type = obj->type | flags;
+         req->global = global;
+         req->handle = wine_server_obj_handle( handle );
+         if (runtime) wine_server_set_reply( req, runtime, *runtime_size );
+@@ -370,6 +370,12 @@
+     if (status) WARN( "Failed to open global object %#x/%p, status %#x\n", global, handle, status );
+     else TRACE( "Opened global object %#x/%p as %p/%#x\n", global, handle, obj, obj->local );
+     return status;
++}
++
++static NTSTATUS d3dkmt_object_open( struct d3dkmt_object *obj, D3DKMT_HANDLE global, HANDLE handle,
++                                    void *runtime, UINT *runtime_size )
++{
++    return d3dkmt_object_open_ex( obj, global, handle, runtime, runtime_size, 0 );
+ }
+ 
+ static NTSTATUS d3dkmt_object_query( enum d3dkmt_type type, D3DKMT_HANDLE global, HANDLE handle,
+@@ -2247,7 +2253,7 @@
+ }
+ 
+ /* create a D3DKMT global or shared sync */
+-D3DKMT_HANDLE d3dkmt_create_sync( int fd, D3DKMT_HANDLE *global, const void *runtime, UINT runtime_size )
++D3DKMT_HANDLE d3dkmt_create_sync( int fd, D3DKMT_HANDLE *global, const void *runtime, UINT runtime_size, HANDLE context )
+ {
+     struct d3dkmt_object *sync = NULL;
+     NTSTATUS status;
+@@ -2255,7 +2261,19 @@
+     TRACE( "global %p\n", global );
+ 
+     if ((status = d3dkmt_object_alloc( sizeof(*sync), D3DKMT_SYNC, (void **)&sync ))) goto failed;
+-    if ((status = d3dkmt_object_create( sync, fd, 0, !global, runtime, runtime_size, NULL ))) goto failed;
++    if ((status = d3dkmt_object_create( sync, fd, wine_server_obj_handle( context ), !global, runtime, runtime_size, NULL ))) goto failed;
++    if (context)
++    {
++        HANDLE check = d3dkmt_open_sync_context( sync->local );
++        if (!check)
++        {
++            /* An older, protocol-compatible server ignores the create value.
++             * Do not export new metadata without its legacy-importer gate. */
++            status = STATUS_NOT_SUPPORTED;
++            goto failed;
++        }
++        NtClose( check );
++    }
+     if (global) *global = sync->global;
+     return sync->local;
+ 
+@@ -2274,7 +2292,8 @@
+     TRACE( "global %#x, shared %p\n", global, shared );
+ 
+     if ((status = d3dkmt_object_alloc( sizeof(*sync), D3DKMT_SYNC, (void **)&sync ))) goto failed;
+-    if ((status = d3dkmt_object_open( sync, global, shared, runtime, &runtime_size ))) goto failed;
++    if ((status = d3dkmt_object_open_ex( sync, global, shared, runtime, &runtime_size,
++                                          D3DKMT_OBJECT_OPEN_CONTEXT_AWARE ))) goto failed;
+     return sync->local;
+ 
+ failed:
+@@ -2283,6 +2302,23 @@
+     return 0;
+ }
+ 
++/* Obtain the shared state section retained by this synchronization object. */
++HANDLE d3dkmt_open_sync_context( D3DKMT_HANDLE local )
++{
++    struct d3dkmt_object *sync;
++    HANDLE handle = NULL;
++
++    if (!(sync = get_d3dkmt_object( local, D3DKMT_SYNC ))) return NULL;
++    SERVER_START_REQ( d3dkmt_object_open )
++    {
++        req->type = D3DKMT_SYNC | D3DKMT_OBJECT_OPEN_CONTEXT_AWARE | D3DKMT_OBJECT_OPEN_CONTEXT;
++        req->global = sync->global;
++        if (!wine_server_call( req )) handle = wine_server_ptr_handle( reply->handle );
++    }
++    SERVER_END_REQ;
++    return handle;
++}
++
+ /* destroy a locally opened D3DKMT sync */
+ NTSTATUS d3dkmt_destroy_sync( D3DKMT_HANDLE local )
+ {
+diff --git a/dlls/win32u/win32u_private.h b/dlls/win32u/win32u_private.h
+--- a/dlls/win32u/win32u_private.h
++++ b/dlls/win32u/win32u_private.h
+@@ -231,7 +231,8 @@
+ extern D3DKMT_HANDLE d3dkmt_open_resource( D3DKMT_HANDLE global, HANDLE shared, D3DKMT_HANDLE *mutex_local, D3DKMT_HANDLE *sync_local );
+ extern NTSTATUS d3dkmt_destroy_resource( D3DKMT_HANDLE local );
+ 
+-extern D3DKMT_HANDLE d3dkmt_create_sync( int fd, D3DKMT_HANDLE *global, const void *runtime, UINT runtime_size );
++extern D3DKMT_HANDLE d3dkmt_create_sync( int fd, D3DKMT_HANDLE *global, const void *runtime, UINT runtime_size, HANDLE context );
++extern HANDLE d3dkmt_open_sync_context( D3DKMT_HANDLE local );
+ extern D3DKMT_HANDLE d3dkmt_open_sync( D3DKMT_HANDLE global, HANDLE shared, void *runtime, UINT runtime_size );
+ extern NTSTATUS d3dkmt_destroy_sync( D3DKMT_HANDLE local );
+ 
+diff --git a/dlls/win32u/vulkan.c b/dlls/win32u/vulkan.c
+--- a/dlls/win32u/vulkan.c
++++ b/dlls/win32u/vulkan.c
+@@ -29,6 +29,8 @@
+ #include <pthread.h>
+ #include <unistd.h>
+ #include <assert.h>
++#include <errno.h>
++#include <time.h>
+ 
+ #include "ntstatus.h"
+ #define WIN32_NO_STATUS
+@@ -241,8 +243,13 @@
+     return CONTAINING_RECORD( obj, struct swapchain, obj );
+ }
+ 
+-struct d3d12_fence_timeline
+-{
++#define D3D12_FENCE_CONTEXT_MAGIC 0x58434644u
++#define D3D12_FENCE_CONTEXT_VERSION 1
++
++struct d3d12_fence_state
++{
++    UINT magic, version, size, mutex_size, pointer_size;
++    LONG ready, broken;
+     pthread_mutex_t mutex;
+     UINT64 virtual_value, physical_value;
+     uint64_t last_reset_physical;
+@@ -254,22 +261,81 @@
+     }
+     reset_backlog[16];
+     uint32_t reset_backlog_count;
+-    volatile LONG ref;
+ };
+ 
+-static void d3d12_fence_timeline_addref( struct d3d12_fence_timeline *t )
+-{
+-    if (t) InterlockedIncrement( &t->ref );
+-}
++/* References and NT handles are local; only numeric state and a process-shared
++ * robust mutex reside in the section retained by the server sync object. */
++struct d3d12_fence_timeline
++{
++    struct d3d12_fence_state *state;
++    HANDLE section;
++    LONG ref;
++};
+ 
+ static void d3d12_fence_timeline_release( struct d3d12_fence_timeline *t )
+ {
+     if (t) TRACE("t %p, ref %d.\n", t, t->ref);
+     if (t && !InterlockedDecrement( &t->ref ))
+     {
+-        pthread_mutex_destroy( &t->mutex );
++        NtUnmapViewOfSection( NtCurrentProcess(), t->state );
++        NtClose( t->section );
+         free( t );
+     }
++}
++
++static struct d3d12_fence_timeline *d3d12_fence_timeline_map( HANDLE section, BOOL initialize )
++{
++    struct d3d12_fence_timeline *t;
++    struct d3d12_fence_state *state = NULL;
++    SIZE_T size = sizeof(*state);
++    pthread_mutexattr_t attr;
++    NTSTATUS status;
++
++    if (!(t = calloc( 1, sizeof(*t) ))) goto failed;
++    status = NtMapViewOfSection( section, NtCurrentProcess(), (void **)&state, 0, 0, NULL,
++                                &size, ViewUnmap, 0, PAGE_READWRITE );
++    if (status || size < sizeof(*state)) goto failed;
++    if (initialize)
++    {
++        if (pthread_mutexattr_init( &attr )) goto failed;
++        if (pthread_mutexattr_setpshared( &attr, PTHREAD_PROCESS_SHARED ) ||
++            pthread_mutexattr_setrobust( &attr, PTHREAD_MUTEX_ROBUST ) ||
++            pthread_mutex_init( &state->mutex, &attr ))
++        {
++            pthread_mutexattr_destroy( &attr );
++            goto failed;
++        }
++        pthread_mutexattr_destroy( &attr );
++        state->magic = D3D12_FENCE_CONTEXT_MAGIC;
++        state->version = D3D12_FENCE_CONTEXT_VERSION;
++        state->size = sizeof(*state);
++        state->mutex_size = sizeof(state->mutex);
++        state->pointer_size = sizeof(void *);
++        __atomic_store_n( &state->ready, 1, __ATOMIC_RELEASE );
++    }
++    else if (!__atomic_load_n( &state->ready, __ATOMIC_ACQUIRE ) ||
++             state->magic != D3D12_FENCE_CONTEXT_MAGIC || state->version != D3D12_FENCE_CONTEXT_VERSION ||
++             state->size != sizeof(*state) || state->mutex_size != sizeof(state->mutex) ||
++             state->pointer_size != sizeof(void *)) goto failed;
++    t->state = state;
++    t->section = section;
++    t->ref = 1;
++    return t;
++
++failed:
++    if (state) NtUnmapViewOfSection( NtCurrentProcess(), state );
++    NtClose( section );
++    free( t );
++    return NULL;
++}
++
++static struct d3d12_fence_timeline *d3d12_fence_timeline_create(void)
++{
++    LARGE_INTEGER size = {.QuadPart = sizeof(struct d3d12_fence_state)};
++    HANDLE section;
++    if (NtCreateSection( &section, SECTION_QUERY | SECTION_MAP_READ | SECTION_MAP_WRITE, NULL,
++                         &size, PAGE_READWRITE, SEC_COMMIT, NULL )) return NULL;
++    return d3d12_fence_timeline_map( section, TRUE );
+ }
+ 
+ struct pending_d3d12_fence_op
+@@ -280,6 +346,7 @@
+     /* Operation values. */
+     struct list entry;
+     uint64_t virtual_value;
++    uint64_t completed_value;
+     uint64_t shared_physical_value;
+     struct semaphore *semaphore;
+ };
+@@ -468,17 +535,39 @@
+ }
+ 
+ /* shared d3d12 fences helpers. */
+-static void d3d12_semaphore_lock( struct semaphore *semaphore )
+-{
+-    if (semaphore->info.t) pthread_mutex_lock( &semaphore->info.t->mutex );
++static VkResult d3d12_semaphore_lock( struct semaphore *semaphore )
++{
++    struct d3d12_fence_state *state = semaphore->info.t->state;
++    int error = pthread_mutex_lock( &state->mutex );
++
++    if (error == EOWNERDEAD)
++    {
++        /* A process may have died halfway through publishing a value. Never
++         * invent a recovered value or signal a pending GPU wait on its behalf. */
++        __atomic_store_n( &state->broken, 1, __ATOMIC_RELEASE );
++        pthread_mutex_consistent( &state->mutex );
++    }
++    else if (error)
++    {
++        __atomic_store_n( &state->broken, 1, __ATOMIC_RELEASE );
++        return VK_ERROR_DEVICE_LOST;
++    }
++    if (__atomic_load_n( &state->broken, __ATOMIC_ACQUIRE ) ||
++        state->reset_backlog_count > ARRAY_SIZE(state->reset_backlog))
++    {
++        __atomic_store_n( &state->broken, 1, __ATOMIC_RELEASE );
++        pthread_mutex_unlock( &state->mutex );
++        return VK_ERROR_DEVICE_LOST;
++    }
++    return VK_SUCCESS;
+ }
+ 
+ static void d3d12_semaphore_unlock( struct semaphore *semaphore )
+ {
+-    if (semaphore->info.t) pthread_mutex_unlock( &semaphore->info.t->mutex );
+-}
+-
+-static void signal_timeline_sem( struct vulkan_device *device, VkSemaphore sem, UINT64 *value )
++    pthread_mutex_unlock( &semaphore->info.t->state->mutex );
++}
++
++static VkResult signal_timeline_sem( struct vulkan_device *device, VkSemaphore sem, UINT64 *value )
+ {
+     /* May be called from native thread. */
+     struct VkSemaphoreSignalInfo info = { 0 };
+@@ -494,6 +583,7 @@
+         res = device->p_vkSignalSemaphore( device->host.device, &info );
+     if (res != VK_SUCCESS)
+         fprintf( stderr, "err:winevulkan:signal_timeline_sem vkSignalSemaphore failed, res=%d.\n", res );
++    return res;
+ }
+ 
+ static VkResult wait_host_semaphores( struct vulkan_device *device, const VkSemaphoreWaitInfo *wait_info, uint64_t timeout )
+@@ -553,6 +643,7 @@
+         fprintf( stderr, "err:winevulkan:wait_info_realloc no memory.\n" );
+         return 0;
+     }
++    wait_info->pSemaphores = new_sem;
+     new_values = realloc( (void *)wait_info->pValues, *wait_alloc_count * 2 * sizeof(*new_values) );
+     if (!new_values)
+     {
+@@ -589,16 +680,26 @@
+     uint32_t i;
+ 
+     /* Check local pending signal ops completion, update shared semaphore. */
+-    d3d12_semaphore_lock( sem );
+-    virtual_value = sem->info.t->virtual_value;
++    if (d3d12_semaphore_lock( sem )) return 1; /* Other fences on this device remain usable. */
++    virtual_value = sem->info.t->state->virtual_value;
++    /* Query backwards, then commit forwards. If a later signal on a queue has
++     * completed, earlier signals on that queue must be observed in this same
++     * pass. Querying and committing forwards can otherwise publish a delayed
++     * earlier value after the final rewind when the GPU advances mid-scan. */
++    LIST_FOR_EACH_ENTRY_REV(op, &sem->pending_signals, struct pending_d3d12_fence_op, entry)
++    {
++        res = get_semaphore_value( device, op->local_sem.sem, &op->completed_value );
++        if (res != VK_SUCCESS)
++        {
++            fprintf( stderr, "err:winevulkan:semaphore_process vkGetSemaphoreCounterValue failed, res=%d.\n", res );
++            __atomic_store_n( &sem->info.t->state->broken, 1, __ATOMIC_RELEASE );
++            d3d12_semaphore_unlock( sem );
++            return 1;
++        }
++    }
+     LIST_FOR_EACH_ENTRY_SAFE(op, op2, &sem->pending_signals, struct pending_d3d12_fence_op, entry)
+     {
+-        res = get_semaphore_value( device, op->local_sem.sem, &value );
+-        if (res != VK_SUCCESS)
+-        {
+-            fprintf( stderr, "err:winevulkan:semaphore_process vkGetSemaphoreCounterValue failed, res=%d.\n", res );
+-            goto signal_op_complete;
+-        }
++        value = op->completed_value;
+         if (value <= op->local_sem.value)
+         {
+             if (!add_sem_wait( wait_info, wait_alloc_count, op->local_sem.sem, op->local_sem.value + 1 ))
+@@ -609,61 +710,72 @@
+             continue;
+         }
+ 
+-        virtual_value = max( sem->info.t->virtual_value, op->virtual_value );
+-        sem->info.t->virtual_value = op->virtual_value;
++        virtual_value = max( virtual_value, op->virtual_value );
++        sem->info.t->state->virtual_value = op->virtual_value;
+         virtual_value_updated = 1;
+-signal_op_complete:
+         op->local_sem.value = value;
+         release_fence_op(device, op);
+     }
+ 
+-    if (sem->info.t->virtual_value < virtual_value)
+-    {
+-        uint32_t idx = sem->info.t->reset_backlog_count;
++    if (sem->info.t->state->virtual_value < virtual_value)
++    {
++        uint32_t idx = sem->info.t->state->reset_backlog_count;
+ 
+         if (debug_level >= 3)
+             fprintf(stderr, "warn:winevulkan:semaphore_process resetting semaphore %p virtual value.\n", sem);
+-        if (idx == ARRAY_SIZE(sem->info.t->reset_backlog))
+-        {
+-            sem->info.t->last_dropped_reset_physical = sem->info.t->reset_backlog[0].physical_at_reset;
++        if (idx == ARRAY_SIZE(sem->info.t->state->reset_backlog))
++        {
++            sem->info.t->state->last_dropped_reset_physical = sem->info.t->state->reset_backlog[0].physical_at_reset;
+             --idx;
+-            memmove( &sem->info.t->reset_backlog[0], &sem->info.t->reset_backlog[1],
+-                     sizeof(*sem->info.t->reset_backlog) * (sem->info.t->reset_backlog_count - 1) );
++            memmove( &sem->info.t->state->reset_backlog[0], &sem->info.t->state->reset_backlog[1],
++                     sizeof(*sem->info.t->state->reset_backlog) * (sem->info.t->state->reset_backlog_count - 1) );
+         }
+         else
+         {
+-            ++sem->info.t->reset_backlog_count;
+-        }
+-        sem->info.t->last_reset_physical = sem->info.t->physical_value + 1;
+-        sem->info.t->reset_backlog[idx].physical_at_reset = sem->info.t->last_reset_physical;
+-        sem->info.t->reset_backlog[idx].virtual_before_reset = virtual_value;
+-    }
+-    if (virtual_value_updated)
+-        signal_timeline_sem( device, sem->shared_sem, &sem->info.t->physical_value );
+-    global_sem_wait_value = sem->info.t->physical_value + 1;
++            ++sem->info.t->state->reset_backlog_count;
++        }
++        sem->info.t->state->last_reset_physical = sem->info.t->state->physical_value + 1;
++        sem->info.t->state->reset_backlog[idx].physical_at_reset = sem->info.t->state->last_reset_physical;
++        sem->info.t->state->reset_backlog[idx].virtual_before_reset = virtual_value;
++    }
++    if (virtual_value_updated && signal_timeline_sem( device, sem->shared_sem, &sem->info.t->state->physical_value ))
++    {
++        __atomic_store_n( &sem->info.t->state->broken, 1, __ATOMIC_RELEASE );
++        d3d12_semaphore_unlock( sem );
++        return 1;
++    }
++    global_sem_wait_value = sem->info.t->state->physical_value + 1;
+ 
+     /* Complete satisfied local waits. */
+     LIST_FOR_EACH_ENTRY_SAFE(op, op2, &sem->pending_waits, struct pending_d3d12_fence_op, entry)
+     {
+         if (op->virtual_value > virtual_value)
+         {
+-            if (op->shared_physical_value > sem->info.t->last_reset_physical)
++            if (op->shared_physical_value > sem->info.t->state->last_reset_physical)
+                 continue;
+-            for (i = 0; i < sem->info.t->reset_backlog_count; ++i)
++            for (i = 0; i < sem->info.t->state->reset_backlog_count; ++i)
+             {
+-                if (sem->info.t->reset_backlog[i].physical_at_reset >= op->shared_physical_value
+-                    && sem->info.t->reset_backlog[i].virtual_before_reset >= op->virtual_value)
++                if (sem->info.t->state->reset_backlog[i].physical_at_reset >= op->shared_physical_value
++                    && sem->info.t->state->reset_backlog[i].virtual_before_reset >= op->virtual_value)
+                     break;
+             }
+-            if (i == sem->info.t->reset_backlog_count)
++            if (i == sem->info.t->state->reset_backlog_count)
+             {
+-                if (sem->info.t->last_dropped_reset_physical < op->shared_physical_value)
++                if (sem->info.t->state->last_dropped_reset_physical < op->shared_physical_value)
+                     continue;
+-                fprintf( stderr, "err:winevulkan:semaphore_process wait needs reset backlog beyond cut off.\n" );
++                ERR( "Fence reset history no longer proves that the wait was satisfied.\n" );
++                __atomic_store_n( &sem->info.t->state->broken, 1, __ATOMIC_RELEASE );
++                d3d12_semaphore_unlock( sem );
++                return 1;
+             }
+         }
+ 
+-        signal_timeline_sem( device, op->local_sem.sem, &op->local_sem.value );
++        if (signal_timeline_sem( device, op->local_sem.sem, &op->local_sem.value ))
++        {
++            __atomic_store_n( &sem->info.t->state->broken, 1, __ATOMIC_RELEASE );
++            d3d12_semaphore_unlock( sem );
++            return 1;
++        }
+         release_fence_op( device, op );
+     }
+     d3d12_semaphore_unlock(sem);
+@@ -693,19 +805,18 @@
+     if (!(wait_info.pSemaphores = malloc( sizeof(*wait_info.pSemaphores) * wait_alloc_count) ))
+     {
+         fprintf( stderr, "err:winevulkan:signaller_worker no memory.\n" );
+-        return NULL;
++        goto stopped;
+     }
+     if (!(wait_info.pValues = malloc( sizeof(*wait_info.pValues) * wait_alloc_count )))
+     {
+         fprintf( stderr, "err:winevulkan:signaller_worker no memory.\n" );
+-        free( (void *)wait_info.pSemaphores );
+-        return NULL;
++        goto stopped;
+     }
+ 
+     for (;;)
+     {
+         pthread_mutex_lock( &device->signaller_mutex );
+-        if (device->stop)
++        if (__atomic_load_n( &device->stop, __ATOMIC_ACQUIRE ))
+         {
+             pthread_mutex_unlock( &device->signaller_mutex );
+             break;
+@@ -717,18 +828,16 @@
+         {
+             if (!semaphore_process( device, sem, &wait_info, &wait_alloc_count ))
+             {
+-                pthread_mutex_unlock( &device->signaller_mutex );
++                __atomic_store_n( &device->stop, TRUE, __ATOMIC_RELEASE );
+                 break;
+             }
+         }
+         device->sem_poll_update_value = device->sem_poll_update.value;
+-        pthread_cond_signal( &device->sem_poll_updated_cond );
++        pthread_cond_broadcast( &device->sem_poll_updated_cond );
+         pthread_mutex_unlock( &device->signaller_mutex );
+-        while ((res = wait_host_semaphores( device, &wait_info, 3000000000ull )) == VK_TIMEOUT)
+-        {
+-            if (wait_info.semaphoreCount > 1)
+-                fprintf( stderr, "err:winevulkan:signaller_worker wait timed out with non-empty poll list.\n" );
+-        }
++        if (__atomic_load_n( &device->stop, __ATOMIC_ACQUIRE )) break;
++        res = wait_host_semaphores( device, &wait_info, 50000000ull );
++        if (res == VK_TIMEOUT) continue; /* Recheck shared state after peer death. */
+         if (res != VK_SUCCESS)
+         {
+             fprintf( stderr, "err:winevulkan:signaller_worker error waiting for semaphores, vr %d.\n", res );
+@@ -736,6 +845,12 @@
+         }
+     }
+ 
++stopped:
++    pthread_mutex_lock( &device->signaller_mutex );
++    __atomic_store_n( &device->stop, TRUE, __ATOMIC_RELEASE );
++    device->sem_poll_update_value = UINT64_MAX; /* Worker has left every native wait. */
++    pthread_cond_broadcast( &device->sem_poll_updated_cond );
++    pthread_mutex_unlock( &device->signaller_mutex );
+     free( (void *)wait_info.pSemaphores );
+     free( (void *)wait_info.pValues );
+     if (debug_level)
+@@ -744,42 +859,91 @@
+     return NULL;
+ }
+ 
+-static void register_sem_poll( struct vulkan_device *device, struct semaphore *semaphore )
+-{
++/* Called with signaller_mutex held. A failed notification must wake every
++ * waiter; a live worker acknowledges removals before wrappers can be unmapped. */
++static VkResult notify_sem_poll_locked( struct vulkan_device *device )
++{
++    if (__atomic_load_n( &device->stop, __ATOMIC_ACQUIRE )) return VK_ERROR_DEVICE_LOST;
++    if (signal_timeline_sem( device, device->sem_poll_update.sem, &device->sem_poll_update.value ))
++    {
++        __atomic_store_n( &device->stop, TRUE, __ATOMIC_RELEASE );
++        pthread_cond_broadcast( &device->sem_poll_updated_cond );
++        return VK_ERROR_DEVICE_LOST;
++    }
++    return VK_SUCCESS;
++}
++
++static VkResult register_sem_poll( struct vulkan_device *device, struct semaphore *semaphore )
++{
++    VkResult res = VK_SUCCESS;
++
+     pthread_mutex_lock( &device->signaller_mutex );
++    if (__atomic_load_n( &device->stop, __ATOMIC_ACQUIRE ))
++    {
++        res = VK_ERROR_DEVICE_LOST;
++        goto done;
++    }
+     if (!device->signaller_thread)
+     {
+-        device->sem_poll_update.sem = create_timeline_semaphore( device );
++        if (!(device->sem_poll_update.sem = create_timeline_semaphore( device )))
++        {
++            res = VK_ERROR_OUT_OF_HOST_MEMORY;
++            goto done;
++        }
+         device->sem_poll_update.value = 0;
+-        pthread_cond_init( &device->sem_poll_updated_cond, NULL );
+-        if (TRACE_ON(vulkan))
+-            debug_level = 4;
+-        else if (WARN_ON(vulkan))
+-            debug_level = 3;
+-        else if (FIXME_ON(vulkan))
+-            debug_level = 2;
+-        else if (ERR_ON(vulkan))
+-            debug_level = 1;
+-        else
+-            debug_level = 0;
++        if (pthread_cond_init( &device->sem_poll_updated_cond, NULL ))
++        {
++            device->p_vkDestroySemaphore( device->host.device, device->sem_poll_update.sem, NULL );
++            device->sem_poll_update.sem = 0;
++            res = VK_ERROR_OUT_OF_HOST_MEMORY;
++            goto done;
++        }
++        if (TRACE_ON(vulkan)) debug_level = 4;
++        else if (WARN_ON(vulkan)) debug_level = 3;
++        else if (FIXME_ON(vulkan)) debug_level = 2;
++        else if (ERR_ON(vulkan)) debug_level = 1;
++        else debug_level = 0;
+         if (pthread_create( &device->signaller_thread, NULL, signaller_worker, device ))
+-            ERR( "Failed to create signaller_worker.\n" );
++        {
++            device->signaller_thread = 0;
++            pthread_cond_destroy( &device->sem_poll_updated_cond );
++            device->p_vkDestroySemaphore( device->host.device, device->sem_poll_update.sem, NULL );
++            device->sem_poll_update.sem = 0;
++            res = VK_ERROR_OUT_OF_HOST_MEMORY;
++            goto done;
++        }
+         WARN( "d3d12 fence used, created signaller worker.\n" );
+     }
+     assert( !semaphore->poll_entry.next );
+     list_add_head( &device->sem_poll_list, &semaphore->poll_entry );
+-    signal_timeline_sem( device, device->sem_poll_update.sem, &device->sem_poll_update.value );
++    if ((res = notify_sem_poll_locked( device )))
++    {
++        list_remove( &semaphore->poll_entry );
++        semaphore->poll_entry.next = semaphore->poll_entry.prev = NULL;
++    }
++done:
+     pthread_mutex_unlock( &device->signaller_mutex );
+-}
+-
+-static void update_sem_poll_wait_processed_locked( struct vulkan_device *device )
++    return res;
++}
++
++static VkResult update_sem_poll_wait_processed_locked( struct vulkan_device *device )
+ {
+     uint64_t update_value;
+-
+-    signal_timeline_sem( device, device->sem_poll_update.sem, &device->sem_poll_update.value );
++    VkResult res;
++
++    res = notify_sem_poll_locked( device );
+     update_value = device->sem_poll_update.value;
+-    while ( device->sem_poll_update_value < update_value )
++    while (!__atomic_load_n( &device->stop, __ATOMIC_ACQUIRE ) && device->sem_poll_update_value < update_value)
+         pthread_cond_wait( &device->sem_poll_updated_cond, &device->signaller_mutex );
++    if (__atomic_load_n( &device->stop, __ATOMIC_ACQUIRE ))
++    {
++        /* Stop requests are not acknowledgements: a worker can still own a
++         * native wait containing the semaphore about to be destroyed. */
++        while (device->sem_poll_update_value != UINT64_MAX)
++            pthread_cond_wait( &device->sem_poll_updated_cond, &device->signaller_mutex );
++        return VK_ERROR_DEVICE_LOST;
++    }
++    return res;
+ }
+ 
+ static void unregister_sem_poll( struct vulkan_device *device, struct semaphore *semaphore )
+@@ -814,34 +978,55 @@
+         ERR( "No memory.\n" );
+         return NULL;
+     }
+-    op->local_sem.sem = create_timeline_semaphore( device );
++    if (!(op->local_sem.sem = create_timeline_semaphore( device )))
++    {
++        free( op );
++        return NULL;
++    }
+     op->local_sem.value = 0;
+     ++device->allocated_fence_ops_count;
+     TRACE( "Total allocated fence ops %u.\n", device->allocated_fence_ops_count );
+     return op;
+ }
+ 
+-static void add_sem_wait_op( struct vulkan_device *device, struct semaphore *semaphore, uint64_t virtual_value,
++static VkResult add_sem_wait_op( struct vulkan_device *device, struct semaphore *semaphore, uint64_t virtual_value,
+                              VkSemaphore *phys_semaphore, uint64_t *phys_wait_value )
+ {
+     struct vulkan_instance *instance = device->physical_device->instance;
+     struct pending_d3d12_fence_op *op;
++    VkResult res;
+ 
+     pthread_mutex_lock( &device->signaller_mutex );
++    if (__atomic_load_n( &device->stop, __ATOMIC_ACQUIRE ) || (res = d3d12_semaphore_lock( semaphore )))
++    {
++        pthread_mutex_unlock( &device->signaller_mutex );
++        return VK_ERROR_DEVICE_LOST;
++    }
++    if (virtual_value <= semaphore->info.t->state->virtual_value)
++    {
++        /* The shared physical value was signalled before its mutex was
++         * released. Already satisfied waits must also succeed at timeout 0. */
++        *phys_semaphore = semaphore->shared_sem;
++        *phys_wait_value = semaphore->info.t->state->physical_value;
++        d3d12_semaphore_unlock( semaphore );
++        pthread_mutex_unlock( &device->signaller_mutex );
++        return VK_SUCCESS;
++    }
+     LIST_FOR_EACH_ENTRY(op, &semaphore->pending_waits, struct pending_d3d12_fence_op, entry)
+     {
+         if (op->virtual_value == virtual_value)
+         {
+             *phys_semaphore = op->local_sem.sem;
+             *phys_wait_value = op->local_sem.value + 1;
++            d3d12_semaphore_unlock( semaphore );
+             pthread_mutex_unlock( &device->signaller_mutex );
+-            return;
++            return VK_SUCCESS;
+         }
+     }
+     if ((op = get_free_fence_op( device )))
+     {
+         op->virtual_value = virtual_value;
+-        op->shared_physical_value = __atomic_load_n( &semaphore->info.t->physical_value, __ATOMIC_ACQUIRE ) + 1;
++        op->shared_physical_value = __atomic_load_n( &semaphore->info.t->state->physical_value, __ATOMIC_ACQUIRE ) + 1;
+         *phys_semaphore = op->local_sem.sem;
+         *phys_wait_value = op->local_sem.value + 1;
+         op->semaphore = semaphore;
+@@ -850,7 +1035,13 @@
+         vulkan_object_init( &semaphore->obj.obj, op->local_sem.sem );
+         instance->p_insert_object( instance, &semaphore->obj.obj );
+ 
+-        signal_timeline_sem( device, device->sem_poll_update.sem, &device->sem_poll_update.value );
++        if ((res = notify_sem_poll_locked( device )))
++        {
++            release_fence_op( device, op );
++            d3d12_semaphore_unlock( semaphore );
++            pthread_mutex_unlock( &device->signaller_mutex );
++            return res;
++        }
+         TRACE( "added wait op, semaphore %p, %s, temp sem %s, %s.\n", semaphore, wine_dbgstr_longlong(virtual_value),
+                 wine_dbgstr_longlong(op->local_sem.sem), wine_dbgstr_longlong(op->local_sem.value) );
+     }
+@@ -859,17 +1050,26 @@
+         *phys_semaphore = 0;
+         *phys_wait_value = 0;
+     }
++    d3d12_semaphore_unlock( semaphore );
+     pthread_mutex_unlock( &device->signaller_mutex );
+-}
+-
+-static void add_sem_signal_op( struct vulkan_device *device, struct semaphore *semaphore, uint64_t virtual_value,
++    return op ? VK_SUCCESS : VK_ERROR_OUT_OF_HOST_MEMORY;
++}
++
++static VkResult add_sem_signal_op( struct vulkan_device *device, struct semaphore *semaphore, uint64_t virtual_value,
+                                VkSemaphore *phys_semaphore, uint64_t *phys_signal_value, BOOL signal_immediate )
+ {
+     struct vulkan_instance *instance = device->physical_device->instance;
+     struct pending_d3d12_fence_op *op;
+     UINT64 value;
++    VkResult res = VK_SUCCESS;
+ 
+     pthread_mutex_lock( &device->signaller_mutex );
++    if (__atomic_load_n( &device->stop, __ATOMIC_ACQUIRE ) || d3d12_semaphore_lock( semaphore ))
++    {
++        pthread_mutex_unlock( &device->signaller_mutex );
++        return VK_ERROR_DEVICE_LOST;
++    }
++    d3d12_semaphore_unlock( semaphore );
+     if ((op = get_free_fence_op( device )))
+     {
+         op->virtual_value = virtual_value;
+@@ -884,14 +1084,19 @@
+         if (signal_immediate)
+         {
+             value = op->local_sem.value;
+-            signal_timeline_sem( device, op->local_sem.sem, &value );
+-            update_sem_poll_wait_processed_locked( device );
++            if ((res = signal_timeline_sem( device, op->local_sem.sem, &value )))
++            {
++                op->local_sem.value = value; /* Never reuse a reserved native signal value. */
++                __atomic_store_n( &semaphore->info.t->state->broken, 1, __ATOMIC_RELEASE );
++                release_fence_op( device, op );
++            }
++            else res = update_sem_poll_wait_processed_locked( device );
+             TRACE( "signal op %p, semaphore %p, %s, temp sem %s, %s.\n", op, semaphore, wine_dbgstr_longlong(virtual_value),
+                    wine_dbgstr_longlong(op->local_sem.sem), wine_dbgstr_longlong(op->local_sem.value) );
+         }
+         else
+         {
+-            signal_timeline_sem( device, device->sem_poll_update.sem, &device->sem_poll_update.value );
++            if ((res = notify_sem_poll_locked( device ))) release_fence_op( device, op );
+             TRACE( "added signal op, semaphore %p, %s, temp sem %s, %s.\n", semaphore, wine_dbgstr_longlong(virtual_value),
+                    wine_dbgstr_longlong(op->local_sem.sem), wine_dbgstr_longlong(op->local_sem.value) );
+         }
+@@ -902,6 +1107,10 @@
+         *phys_signal_value = 0;
+     }
+     pthread_mutex_unlock( &device->signaller_mutex );
++    if (__atomic_load_n( &semaphore->info.t->state->broken, __ATOMIC_ACQUIRE ) ||
++        __atomic_load_n( &device->stop, __ATOMIC_ACQUIRE )) return VK_ERROR_DEVICE_LOST;
++    if (res) return res;
++    return op ? VK_SUCCESS : VK_ERROR_OUT_OF_HOST_MEMORY;
+ }
+ /* end of d3d12 shared fences helpers. */
+ 
+@@ -1545,7 +1754,7 @@
+     {
+         TRACE( "Shutting down signaller thread.\n" );
+         pthread_mutex_lock( &device->signaller_mutex );
+-        device->stop = 1;
++        __atomic_store_n( &device->stop, TRUE, __ATOMIC_RELEASE );
+         signal_timeline_sem( device, device->sem_poll_update.sem, &device->sem_poll_update.value );
+         pthread_mutex_unlock( &device->signaller_mutex );
+         pthread_join( device->signaller_thread, NULL );
+@@ -4279,7 +4488,7 @@
+                     struct semaphore *semaphore = semaphore_from_handle( submit->pWaitSemaphores[j] );
+ 
+                     if (!semaphore->info.type) continue;
+-                    add_sem_wait_op( device, semaphore, values[j], &wait_semaphores[j], &values[j] );
++                    { if ((res = add_sem_wait_op( device, semaphore, values[j], &wait_semaphores[j], &values[j] ))) goto failed; }
+                 }
+             }
+             submit->pWaitSemaphores = wait_semaphores;
+@@ -4322,7 +4531,7 @@
+                     struct semaphore *semaphore = semaphore_from_handle( submit->pSignalSemaphores[j] );
+ 
+                     if (!semaphore->info.type) continue;
+-                    add_sem_signal_op( device, semaphore, values[j], &signal_semaphores[j], &values[j], FALSE );
++                    { if ((res = add_sem_signal_op( device, semaphore, values[j], &signal_semaphores[j], &values[j], FALSE ))) goto failed; }
+                 }
+             }
+             for (uint32_t j = 0; j < signal_count; j++) signal_semaphores[submit->signalSemaphoreCount + j] = signal_infos[j].semaphore;
+@@ -4385,7 +4594,7 @@
+             struct semaphore *semaphore = semaphore_from_handle( semaphore_infos[j].semaphore );
+ 
+             if (semaphore->info.type)
+-                add_sem_wait_op( device, semaphore, semaphore_infos[j].value, &semaphore_infos[j].semaphore, &semaphore_infos[j].value );
++                { if ((res = add_sem_wait_op( device, semaphore, semaphore_infos[j].value, &semaphore_infos[j].semaphore, &semaphore_infos[j].value ))) goto failed; }
+             else
+                 semaphore_infos[j].semaphore = semaphore->obj.host.semaphore;
+             if (semaphore_infos->pNext) FIXME( "Unhandled struct chain\n" );
+@@ -4397,7 +4606,7 @@
+             struct semaphore *semaphore = semaphore_from_handle( semaphore_infos[j].semaphore );
+ 
+             if (semaphore->info.type)
+-                add_sem_signal_op( device, semaphore, semaphore_infos[j].value, &semaphore_infos[j].semaphore, &semaphore_infos[j].value, FALSE );
++                { if ((res = add_sem_signal_op( device, semaphore, semaphore_infos[j].value, &semaphore_infos[j].semaphore, &semaphore_infos[j].value, FALSE ))) goto failed; }
+             else
+                 semaphore_infos[j].semaphore = semaphore->obj.host.semaphore;
+             if (semaphore_infos->pNext) FIXME( "Unhandled struct chain\n" );
+@@ -4460,8 +4669,9 @@
+ 
+     if (semaphore->info.type)
+     {
+-        d3d12_semaphore_lock( semaphore );
+-        *value = semaphore->info.t->virtual_value;
++        if (__atomic_load_n( &device->stop, __ATOMIC_ACQUIRE ) ||
++            d3d12_semaphore_lock( semaphore )) return VK_ERROR_DEVICE_LOST;
++        *value = semaphore->info.t->state->virtual_value;
+         d3d12_semaphore_unlock( semaphore );
+         return VK_SUCCESS;
+     }
+@@ -4475,8 +4685,9 @@
+ 
+     if (semaphore->info.type)
+     {
+-        d3d12_semaphore_lock(semaphore);
+-        *value = semaphore->info.t->virtual_value;
++        if (__atomic_load_n( &device->stop, __ATOMIC_ACQUIRE ) ||
++            d3d12_semaphore_lock( semaphore )) return VK_ERROR_DEVICE_LOST;
++        *value = semaphore->info.t->state->virtual_value;
+         d3d12_semaphore_unlock(semaphore);
+         return VK_SUCCESS;
+     }
+@@ -4491,8 +4702,7 @@
+ 
+     if (semaphore->info.type)
+     {
+-        add_sem_signal_op( device, semaphore, signal_info->value, &host_info.semaphore, &host_info.value, TRUE );
+-        return VK_SUCCESS;
++        return add_sem_signal_op( device, semaphore, signal_info->value, &host_info.semaphore, &host_info.value, TRUE );
+     }
+     host_info.semaphore = semaphore->obj.host.semaphore;
+     return device->p_vkSignalSemaphore( device->host.device, &host_info );
+@@ -4506,44 +4716,77 @@
+ 
+     if (semaphore->info.type)
+     {
+-        add_sem_signal_op( device, semaphore, signal_info->value, &host_info.semaphore, &host_info.value, TRUE );
+-        return VK_SUCCESS;
++        return add_sem_signal_op( device, semaphore, signal_info->value, &host_info.semaphore, &host_info.value, TRUE );
+     }
+     host_info.semaphore = semaphore->obj.host.semaphore;
+     return device->p_vkSignalSemaphoreKHR( device->host.device, &host_info );
+ }
+ 
++static uint64_t semaphore_wait_clock(void)
++{
++    struct timespec now;
++    clock_gettime( CLOCK_MONOTONIC, &now );
++    return (uint64_t)now.tv_sec * 1000000000ull + now.tv_nsec;
++}
++
+ static VkResult wait_semaphores( struct vulkan_device *device, const VkSemaphoreWaitInfo *wait_info, uint64_t timeout,
+                           PFN_vkWaitSemaphores p_vkWaitSemaphores )
+ {
+-    VkSemaphoreWaitInfo host_info;
++    VkSemaphoreWaitInfo host_info = *wait_info;
+     struct mempool pool = {0};
+-    uint64_t *values = NULL;
++    struct semaphore **emulated;
++    uint64_t *values, started = semaphore_wait_clock(), elapsed, slice;
++    VkSemaphore *semaphores;
++    unsigned int i, emulated_count = 0;
+     VkResult ret;
+-    unsigned int i;
+-
++
++    if (!(values = mem_alloc( &pool, wait_info->semaphoreCount * sizeof(*values) )) ||
++        !(semaphores = mem_alloc( &pool, wait_info->semaphoreCount * sizeof(*semaphores) )) ||
++        !(emulated = mem_alloc( &pool, wait_info->semaphoreCount * sizeof(*emulated) )))
++    {
++        ret = VK_ERROR_OUT_OF_HOST_MEMORY;
++        goto done;
++    }
++    host_info.pValues = values;
++    host_info.pSemaphores = semaphores;
+     for (i = 0; i < wait_info->semaphoreCount; ++i)
+     {
+         struct semaphore *semaphore = semaphore_from_handle( wait_info->pSemaphores[i] );
+-        /* cast away const, it has been copied in the thunks */
++        values[i] = wait_info->pValues[i];
+         if (semaphore->info.type)
+         {
+-            if (!values)
+-            {
+-                host_info = *wait_info;
+-                wait_info = &host_info;
+-                values = mem_alloc( &pool, wait_info->semaphoreCount * sizeof(*values) );
+-                memcpy( values, wait_info->pValues, wait_info->semaphoreCount * sizeof(*values) );
+-                host_info.pValues = values;
+-            }
+-            add_sem_wait_op( device, semaphore, values[i], &((VkSemaphore *)wait_info->pSemaphores)[i], &values[i] );
+-        }
+-        else ((VkSemaphore *)wait_info->pSemaphores)[i] = semaphore->obj.host.semaphore;
+-    }
+-    ret = p_vkWaitSemaphores( device->host.device, wait_info, timeout );
++            emulated[emulated_count++] = semaphore;
++            if ((ret = add_sem_wait_op( device, semaphore, values[i], &semaphores[i], &values[i] ))) goto done;
++        }
++        else semaphores[i] = semaphore->obj.host.semaphore;
++    }
++    if (!emulated_count)
++    {
++        ret = p_vkWaitSemaphores( device->host.device, &host_info, timeout );
++        goto done;
++    }
++    /* A process can die while a native wait is in progress. Keep the original
++     * deadline, but revisit robust shared mutexes even for an infinite wait. */
++    for (;;)
++    {
++        if (__atomic_load_n( &device->stop, __ATOMIC_ACQUIRE ))
++        {
++            ret = VK_ERROR_DEVICE_LOST;
++            break;
++        }
++        for (i = 0; i < emulated_count; ++i)
++        {
++            if ((ret = d3d12_semaphore_lock( emulated[i] ))) goto done;
++            d3d12_semaphore_unlock( emulated[i] );
++        }
++        elapsed = semaphore_wait_clock() - started;
++        slice = elapsed >= timeout ? 0 : min( timeout - elapsed, 50000000ull );
++        ret = p_vkWaitSemaphores( device->host.device, &host_info, slice );
++        if (ret != VK_TIMEOUT || elapsed >= timeout) break;
++    }
++done:
+     mem_free( &pool );
+-    if (ret && ret != VK_TIMEOUT)
+-        ERR( "vkWaitSemaphores failed, vr %d.\n", ret );
++    if (ret && ret != VK_TIMEOUT) ERR( "vkWaitSemaphores failed, vr %d.\n", ret );
+     return ret;
+ }
+ 
+@@ -4631,11 +4874,13 @@
+                 if (export_info->handleTypes & VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_D3D12_FENCE_BIT)
+                 {
+                     WARN( "Creating d3d12 shared fence.\n" );
+-                    semaphore->info.type = 1;
++                    semaphore->info.type = 2;
+                     semaphore->info.pid = GetCurrentProcessId();
+-                    semaphore->info.t = calloc( 1, sizeof(*semaphore->info.t) );
+-                    semaphore->info.t->ref = 1;
+-                    pthread_mutex_init( &semaphore->info.t->mutex, NULL );
++                    if (!(semaphore->info.t = d3d12_fence_timeline_create()))
++                    {
++                        free( semaphore );
++                        return VK_ERROR_OUT_OF_HOST_MEMORY;
++                    }
+                 }
+                 export_info->handleTypes = get_host_external_semaphore_type();
+             }
+@@ -4650,6 +4895,15 @@
+         }
+     }
+ 
++    if (semaphore->info.t)
++    {
++        VkSemaphoreTypeCreateInfo *type = find_vk_struct( create_info, VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO );
++        if (type)
++        {
++            semaphore->info.t->state->virtual_value = type->initialValue;
++            type->initialValue = 0; /* The physical counter counts updates, including rewinds. */
++        }
++    }
+     if ((res = device->p_vkCreateSemaphore( device->host.device, create_info, NULL /* allocator */, &host_semaphore )))
+     {
+         d3d12_fence_timeline_release( semaphore->info.t );
+@@ -4659,6 +4913,7 @@
+ 
+     if (export_info)
+     {
++        struct d3d12_fence_info runtime_info;
+         VkSemaphoreGetFdInfoKHR fd_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR, .semaphore = host_semaphore};
+         int fd = -1;
+ 
+@@ -4672,7 +4927,10 @@
+             break;
+         }
+ 
+-        semaphore->local = d3dkmt_create_sync( fd, nt_shared ? NULL : &semaphore->global, &semaphore->info, sizeof(semaphore->info) );
++        runtime_info = semaphore->info;
++        runtime_info.t = NULL; /* A serialized context never contains a process-local pointer. */
++        semaphore->local = d3dkmt_create_sync( fd, nt_shared ? NULL : &semaphore->global, &runtime_info, sizeof(runtime_info),
++                                                semaphore->info.t ? semaphore->info.t->section : NULL );
+         close( fd );
+ 
+         if (!semaphore->local) goto failed;
+@@ -4680,12 +4938,12 @@
+     }
+ 
+     vulkan_object_init( &semaphore->obj.obj, host_semaphore );
++    if (semaphore->info.type)
++    {
++        semaphore->shared_sem = host_semaphore;
++        if ((res = register_sem_poll( device, semaphore ))) goto failed;
++    }
+     instance->p_insert_object( instance, &semaphore->obj.obj );
+-    if (semaphore->info.type)
+-    {
+-        semaphore->shared_sem = host_semaphore;
+-        register_sem_poll( device, semaphore );
+-    }
+ 
+     *ret = semaphore->obj.client.semaphore;
+     TRACE( "semaphore %p.\n", semaphore );
+@@ -4694,10 +4952,11 @@
+ failed:
+     WARN( "Failed to create semaphore, res %d\n", res );
+     device->p_vkDestroySemaphore( device->host.device, host_semaphore, NULL );
++    if (semaphore->shared) NtClose( semaphore->shared );
+     d3dkmt_destroy_sync( semaphore->local );
+     d3d12_fence_timeline_release( semaphore->info.t );
+     free( semaphore );
+-    return VK_ERROR_OUT_OF_HOST_MEMORY;
++    return res ? res : VK_ERROR_OUT_OF_HOST_MEMORY;
+ }
+ 
+ static void win32u_vkDestroySemaphore( VkDevice client_device, VkSemaphore client_semaphore, const VkAllocationCallbacks *allocator )
+@@ -4750,12 +5009,13 @@
+ 
+ static VkResult win32u_vkImportSemaphoreWin32HandleKHR( VkDevice client_device, const VkImportSemaphoreWin32HandleInfoKHR *handle_info )
+ {
+-    VkImportSemaphoreFdInfoKHR fd_info = {.sType = VK_STRUCTURE_TYPE_IMPORT_SEMAPHORE_FD_INFO_KHR};
++    VkImportSemaphoreFdInfoKHR fd_info = {.sType = VK_STRUCTURE_TYPE_IMPORT_SEMAPHORE_FD_INFO_KHR, .fd = -1};
+     struct vulkan_device *device = vulkan_device_from_handle( client_device );
+     struct semaphore *semaphore = semaphore_from_handle( handle_info->semaphore );
+     struct vulkan_instance *instance = device->physical_device->instance;
+-    struct d3d12_fence_info fence_info = { 0 };
++    struct d3d12_fence_info fence_info = {0};
+     D3DKMT_HANDLE local, global = 0;
++    VkSemaphore new_semaphore = 0;
+     VkResult res = VK_SUCCESS;
+     HANDLE shared = NULL;
+ 
+@@ -4769,12 +5029,13 @@
+         break;
+     case VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT:
+     case VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_D3D12_FENCE_BIT:
+-        if (handle_info->name && !(shared = open_shared_semaphore_from_name( handle_info->name )))
++        if (handle_info->name)
++        {
++            if (!(shared = open_shared_semaphore_from_name( handle_info->name ))) return VK_ERROR_INVALID_EXTERNAL_HANDLE;
++        }
++        else if (!handle_info->handle || NtDuplicateObject( NtCurrentProcess(), handle_info->handle, NtCurrentProcess(), &shared,
++                                                            0, 0, DUPLICATE_SAME_ATTRIBUTES | DUPLICATE_SAME_ACCESS ))
+             return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+-        else if (!(shared = handle_info->handle) || NtDuplicateObject( NtCurrentProcess(), shared, NtCurrentProcess(), &shared,
+-                                                                       0, 0, DUPLICATE_SAME_ATTRIBUTES | DUPLICATE_SAME_ACCESS ))
+-            return VK_ERROR_INVALID_EXTERNAL_HANDLE;
+-
+         if (!(local = d3dkmt_open_sync( 0, shared, &fence_info, sizeof(fence_info) )))
+         {
+             NtClose( shared );
+@@ -4787,16 +5048,22 @@
+     }
+ 
+     TRACE( "fence_info type %d, pid %04x.\n", fence_info.type, fence_info.pid );
+-    if (fence_info.type && fence_info.pid != GetCurrentProcessId())
+-    {
+-        FIXME( "d3d12 fence from other process.\n" );
+-        memset( &semaphore->info, 0, sizeof(semaphore->info) );
+-    }
+-
+-    if ((fd_info.fd = d3dkmt_object_get_fd( local )) < 0) res = VK_ERROR_INVALID_EXTERNAL_HANDLE;
+-    if (!res && handle_info->handleType == VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_D3D12_FENCE_BIT)
+-    {
+-        /* Recreate semaphore to make sure it has timeline type. */
++    /* Runtime metadata is untrusted wire data, never a dereferenceable pointer. */
++    fence_info.t = NULL;
++    if (fence_info.type == 2)
++    {
++        HANDLE section = d3dkmt_open_sync_context( local );
++        fence_info.t = section ? d3d12_fence_timeline_map( section, FALSE ) : NULL;
++        if (!fence_info.t || (handle_info->flags & VK_SEMAPHORE_IMPORT_TEMPORARY_BIT)) res = VK_ERROR_INVALID_EXTERNAL_HANDLE;
++    }
++    else if (fence_info.type || handle_info->handleType == VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_D3D12_FENCE_BIT)
++        res = VK_ERROR_INVALID_EXTERNAL_HANDLE;
++
++    if (!res && (fd_info.fd = d3dkmt_object_get_fd( local )) < 0) res = VK_ERROR_INVALID_EXTERNAL_HANDLE;
++    if (!res && (fence_info.type || semaphore->info.type))
++    {
++        /* Stage a new host object. The existing worker and payload must stay
++         * intact until import has succeeded, including on every error path. */
+         VkSemaphoreTypeCreateInfo type_info =
+         {
+             .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+@@ -4807,45 +5074,42 @@
+             .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+             .pNext = &type_info,
+         };
+-        VkSemaphore new_semaphore;
+-
+-        if ((res = device->p_vkCreateSemaphore( device->host.device, &create_info, NULL, &new_semaphore )))
+-        {
+-            ERR( "Failed to create timeline semaphore, vr %d.\n", res );
+-        }
+-        else
+-        {
+-            instance->p_remove_object( instance, &semaphore->obj.obj );
+-            device->p_vkDestroySemaphore( device->host.device, semaphore->obj.host.semaphore, NULL );
+-            semaphore->obj.host.semaphore = new_semaphore;
+-            instance->p_insert_object( instance, &semaphore->obj.obj );
+-        }
+-    }
+-
++        res = device->p_vkCreateSemaphore( device->host.device, &create_info, NULL, &new_semaphore );
++    }
+     if (!res)
+     {
+         fd_info.handleType = get_host_external_semaphore_type();
+-        fd_info.semaphore = semaphore->obj.host.semaphore;
++        fd_info.semaphore = new_semaphore ? new_semaphore : semaphore->obj.host.semaphore;
+         fd_info.flags = handle_info->flags;
+         res = device->p_vkImportSemaphoreFdKHR( device->host.device, &fd_info );
+-    }
+-
++        if (!res) fd_info.fd = -1; /* A successful Vulkan import consumes its fd. */
++    }
+     if (!res)
+     {
+-        d3d12_fence_timeline_addref( fence_info.t );
+-        if (semaphore->info.type && semaphore->poll_entry.next) unregister_sem_poll( device, semaphore );
++        if (semaphore->poll_entry.next) unregister_sem_poll( device, semaphore );
++        if (new_semaphore)
++        {
++            VkSemaphore old_semaphore = semaphore->info.type ? semaphore->shared_sem : semaphore->obj.host.semaphore;
++            instance->p_remove_object( instance, &semaphore->obj.obj );
++            device->p_vkDestroySemaphore( device->host.device, old_semaphore, NULL );
++            vulkan_object_init( &semaphore->obj.obj, new_semaphore );
++            instance->p_insert_object( instance, &semaphore->obj.obj );
++            new_semaphore = 0;
++        }
+         d3d12_fence_timeline_release( semaphore->info.t );
+         semaphore->info = fence_info;
+         if (semaphore->info.type)
+         {
+             semaphore->shared_sem = semaphore->obj.host.semaphore;
+-            register_sem_poll( device, semaphore );
+-        }
+-    }
+-
+-    if (res || handle_info->flags & VK_SEMAPHORE_IMPORT_TEMPORARY_BIT)
+-    {
+-        /* FIXME: Should we still keep the temporary handles for vkGetSemaphoreWin32HandleKHR? */
++            res = register_sem_poll( device, semaphore );
++        }
++        fence_info.t = NULL; /* The semaphore owns the wrapper, including on registration failure. */
++    }
++    if (new_semaphore) device->p_vkDestroySemaphore( device->host.device, new_semaphore, NULL );
++    if (fd_info.fd >= 0) close( fd_info.fd );
++    d3d12_fence_timeline_release( fence_info.t );
++    if (res || (handle_info->flags & VK_SEMAPHORE_IMPORT_TEMPORARY_BIT))
++    {
+         if (shared) NtClose( shared );
+         d3dkmt_destroy_sync( local );
+     }
+@@ -4961,7 +5225,7 @@
+             break;
+         }
+ 
+-        fence->local = d3dkmt_create_sync( fd, nt_shared ? NULL : &fence->global, NULL, 0 );
++        fence->local = d3dkmt_create_sync( fd, nt_shared ? NULL : &fence->global, NULL, 0, NULL );
+         close( fd );
+ 
+         if (!fence->local) goto failed;

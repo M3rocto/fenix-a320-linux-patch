@@ -10,8 +10,12 @@ This packages the Wine fixes tested with Fenix **2.4.0.4720**, MSFS 2024
 FCU and radio display rendering were checked in a running cockpit. A complete
 flight and other Fenix versions have not been independently validated.
 
-**Preview.7** replaces the Python installer with a single program that needs
-no runtime. The Wine overlays and helpers are the preview.6 files, unchanged.
+**Preview.8** adds GPU display sharing for the pinned Xodus and
+Proton 11 runners. It fixes the missing shared-texture adapter query and
+Proton 11's cross-process fence state. The Xodus path has been checked in a
+live Fenix cockpit, including a moving airspeed tape; full flights and NVIDIA
+are still untested. CachyOS Proton 10 keeps CPU rendering. See
+[GPU displays and validation](docs/gpu-displays.md).
 
 **Preview.5** adds the standalone Steam installation with a guided setup and an
 overlay for CachyOS Proton 11.0 (20261005), next to the overlays for Proton
@@ -47,7 +51,7 @@ Use Flightdeck's **Add-ons → Fenix A320** panel. It downloads the pinned,
 checksummed patch release, installs it with Flightdeck's own code and leads
 through the same steps: install the patch, run the official Fenix Installer
 from your [Fenix account](https://fenixsim.com/dashboard/), open Fenix and sign
-in, apply the settings (CPU displays and Legacy readouts). Login and activation
+in, apply the settings (the supported display renderer and Legacy readouts). Login and activation
 remain in the official Fenix software.
 
 `./install.sh` from this ZIP does not install into a runtime of current
@@ -66,7 +70,8 @@ WebView2, .NET Desktop Runtime and Visual C++ prerequisites.
 
 Flightdeck can switch a patched installation between supported runners while
 retaining aircraft, add-ons and settings. Each overlay is compiled from that
-runner’s Wine revision; its DXVK/VKD3D stay unchanged. Other Proton builds require
+runner’s Wine revision; GPU overlays also replace DXGI from that runner's exact
+DXVK revision. D3D11 and VKD3D are retained. Other Proton builds require
 a matching overlay before Fenix can use them. In Flightdeck, MSFS 2020 remains
 outside this preview. Flightdeck can migrate recognized local Fenix setups when
 switching Proton; arbitrary modified launch scripts are preserved and rejected.
@@ -86,6 +91,7 @@ finds. `--steam msfs2020|msfs2024` takes the same commands as `--runtime`.
 ./install.sh installer --runtime /path/to/flightdeck/runtime --exe "$HOME/Downloads/FenixInstaller.exe"
 ./install.sh open --runtime /path/to/flightdeck/runtime
 ./install.sh configure --runtime /path/to/flightdeck/runtime
+./install.sh configure --runtime /path/to/flightdeck/runtime --renderer cpu
 ./install.sh restore --runtime /path/to/flightdeck/runtime
 ```
 
@@ -95,9 +101,12 @@ geometry dependency, copies the existing runner's fonts and graphics dependencie
 and installs the compatibility overlay after the staging Wine session exits. It retains the
 original runner, profile and launch scripts. An interrupted installation has a
 recovery journal. Repeating an already completed installation verifies its files.
-Running `install` from preview.7 also updates verified preview.1–preview.6 installations,
+Running `install` from preview.8 also updates verified preview.1–preview.7 installations,
 retaining installed aircraft, settings and the original restore point. On Steam it
-replaces the overlay of a preview.5 or preview.6 installation in place. Flightdeck
+replaces an earlier supported overlay in place. An earlier automatic CPU setting
+migrates to GPU when the selected overlay supports it. An explicit
+`configure --renderer cpu` preference survives later configuration and upgrades;
+`--renderer gpu` selects GPU again on a supported overlay. Flightdeck
 performs that update before opening Fenix applications when needed.
 
 `restore` restores the profile from before the patch and retains the newer
@@ -107,8 +116,11 @@ not removed. Flightdeck's separate Xbox save storage is not part of this restore
 
 ## Displays and windows
 
-The current working configuration uses **CPU** rendering and **Legacy** FCU
-readouts. Weather radar is unavailable with this rendering path. Brightness
+The supported Xodus and Proton 11 overlays use **GPU** display sharing and
+**Legacy** FCU readouts. The installer validates the complete matched Wine/DXGI
+overlay before enabling GPU. CPU remains available as a persistent fallback;
+the CachyOS Proton 10 overlay uses it by default. Weather radar is unavailable
+in CPU mode; GPU weather radar has not been validated. Brightness
 knobs remain normal aircraft controls; the installer does not force lighting
 values or autopilot modes. A bounded display-refresh helper temporarily changes
 the pop-out display preference after Fenix Display starts, then restores it.
@@ -129,15 +141,17 @@ continues to render the displays. See [the rendering checks](docs/stroke-contour
 
 ## What is distributed
 
-The release contains our installer and helper tools, Wine patches, eleven Wine
+The release contains our installer and helper tools, Wine and DXVK patches,
 replacement binaries and their complete source archives/build instructions.
+GPU overlays contain fourteen Wine modules and one DXGI DLL; CPU-only overlays
+retain eleven Wine modules.
 **No Fenix or Microsoft binaries, aircraft, fonts, activation data, saved
 profiles or private logs are included.** Microsoft redistributables are fetched
 from Microsoft and verified against pinned hashes. Existing fonts are read
 from your own compatible runner.
 
 Installer/window guard: MIT. Wine patches and derived Wine binaries:
-LGPL-2.1-or-later; upstream notices are retained in the included source archives.
+LGPL-2.1-or-later; DXVK: zlib/libpng. Upstream notices are retained in the included source archives.
 See [BUILDING.md](BUILDING.md) and [THIRD_PARTY.md](THIRD_PARTY.md).
 
 For a bug report, include patch/Fenix/MSFS versions, distribution, desktop and

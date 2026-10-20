@@ -1,4 +1,24 @@
-# Unreleased
+# 0.1.0-preview.8 — 20 October 2026
+
+* Preview.8 adds GPU display transport for the pinned Xodus and Proton 11
+  overlays. Wine records the shared texture's real adapter, and DXGI implements
+  the owner query that previously returned `E_NOTIMPL`. Proton 11 also shares
+  virtual fence state safely between processes instead of dereferencing a
+  foreign pointer or returning physical Vulkan ticks.
+* Each GPU overlay carries fourteen matching Wine modules and DXGI built from
+  its own runner's exact DXVK revision. D3D11 and VKD3D are retained. Complete
+  source archives, recursive submodule pins and the DXVK licence are included.
+  CachyOS Proton 10 retains the CPU path.
+* Existing automatic CPU settings migrate to GPU on capable overlays.
+  `configure --renderer cpu|gpu` records a persistent preference, retained
+  across later configuration and upgrades. Older and CPU-only variants cannot
+  inherit or force-enable GPU support. Native DXGI is updated in an existing
+  Windows profile as well as in the runner.
+* The Xodus GPU path has been checked in a running Fenix cockpit and with a
+  controlled moving airspeed tape. Own-code resource and fence tests also cover
+  multiple GPUs, separate processes, pixel transfer, handle lifetime and
+  Proton 11's virtual values. Full flights, NVIDIA and GPU weather radar remain
+  unvalidated. See [GPU displays](gpu-displays.md) for the precise scope.
 
 * The guided setup shows what a running step has finished, what it is doing
   now and for how long: an activity bar, the completed sub-steps and the

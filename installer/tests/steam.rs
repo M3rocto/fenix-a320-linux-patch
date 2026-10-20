@@ -3,7 +3,9 @@
 #![allow(clippy::unwrap_used)]
 mod common;
 
-use common::{Manifest, Messages, Mock, assert_patch_error, digest, digests, glob, put, read};
+use common::{
+    Manifest, Messages, Mock, assert_patch_error, digest, digests, glob, gpu_overlay, put, read,
+};
 use fenix_patch::{
     Error, core, fsx, guide,
     json::{self, Value, json},
@@ -503,6 +505,177 @@ fn configure_registers_autostart_in_the_matching_simulator_folder() {
     put(&fx.config(), &config());
     fx.select_tool().unwrap();
     assert_eq!(fx.snapshot(&fx.item)["tool_selected"], true);
+}
+
+#[test]
+fn gpu_configuration_supports_an_explicit_cpu_fallback() {
+    let fx = Fixture::new();
+    let mut lock = fx.mock.lock();
+    gpu_overlay(
+        &fx.bundle.join("payload/variants/fixture"),
+        &mut lock["variants"]["fixture"],
+    );
+    fx.publish(&lock);
+    fx.install(&fx.item).unwrap();
+    put(&fx.prefix.join(core::PROGRAM).join("Fenix.exe"), "MZ");
+    put(
+        &fx.prefix.join(core::CONFIG).join("fenixConfig.xml"),
+        "<config><UserChoice>keep</UserChoice></config>",
+    );
+    put(
+        &fx.prefix.join(core::CONFIG).join("persistancy.xml"),
+        "<state/>",
+    );
+    fx.configure(&fx.item).unwrap();
+    assert_eq!(fx.state(&fx.item)["display_renderer"], "GPU");
+    assert!(
+        fx.state(&fx.item)
+            .get("display_renderer_override")
+            .is_none()
+    );
+    assert_eq!(fx.snapshot(&fx.item)["display_renderer"], "GPU");
+    let path = fx.prefix.join(core::CONFIG).join("fenixConfig.xml");
+    let config = document(&path);
+    for (tag, value) in [
+        ("displayMode", "GPU"),
+        ("newRender", "true"),
+        ("preferCPU", "false"),
+        ("multithread", "true"),
+        ("UserChoice", "keep"),
+    ] {
+        assert_eq!(config.findtext(tag), value);
+    }
+    steam::configure_with_renderer(
+        fx.mock.as_ref(),
+        &fx.item,
+        &silent,
+        Some(core::DisplayRenderer::Cpu),
+    )
+    .unwrap();
+    assert_eq!(fx.state(&fx.item)["display_renderer"], "CPU");
+    let config = document(&path);
+    assert_eq!(config.findtext("displayMode"), "CPU");
+    assert_eq!(config.findtext("newRender"), "false");
+    assert_eq!(config.findtext("preferCPU"), "true");
+    fx.configure(&fx.item).unwrap();
+    assert_eq!(fx.state(&fx.item)["display_renderer"], "CPU");
+    assert_eq!(fx.state(&fx.item)["display_renderer_override"], "CPU");
+    steam::configure_with_renderer(
+        fx.mock.as_ref(),
+        &fx.item,
+        &silent,
+        Some(core::DisplayRenderer::Gpu),
+    )
+    .unwrap();
+    assert_eq!(fx.state(&fx.item)["display_renderer"], "GPU");
+    assert_eq!(fx.state(&fx.item)["display_renderer_override"], "GPU");
+    assert!(glob(&fx.item.state(), "settings-").len() >= 3);
+}
+
+#[test]
+fn a_legacy_overlay_cannot_be_forced_to_use_gpu_displays() {
+    let fx = Fixture::new();
+    fx.install(&fx.item).unwrap();
+    put(&fx.prefix.join(core::PROGRAM).join("Fenix.exe"), "MZ");
+    put(
+        &fx.prefix.join(core::CONFIG).join("fenixConfig.xml"),
+        "<config/>",
+    );
+    put(
+        &fx.prefix.join(core::CONFIG).join("persistancy.xml"),
+        "<state/>",
+    );
+    fx.configure(&fx.item).unwrap();
+    let before = fx.state(&fx.item);
+    let settings = fx.prefix.join(core::CONFIG).join("fenixConfig.xml");
+    let content = read(&settings);
+    let backups = glob(&fx.item.state(), "settings-");
+    assert_patch_error(
+        steam::configure_with_renderer(
+            fx.mock.as_ref(),
+            &fx.item,
+            &silent,
+            Some(core::DisplayRenderer::Gpu),
+        ),
+        "CPU displays only",
+    );
+    assert_eq!(fx.state(&fx.item), before);
+    assert_eq!(read(&settings), content);
+    assert_eq!(glob(&fx.item.state(), "settings-"), backups);
+    assert_eq!(fx.snapshot(&fx.item)["display_renderer"], "CPU");
+}
+
+#[test]
+fn updating_a_cpu_profile_applies_gpu_settings_and_backs_up_the_cpu_settings() {
+    let fx = Fixture::new();
+    let mut lock = fx.mock.lock();
+    lock["version"] = json!("0.1.0-preview.7");
+    fx.publish(&lock);
+    fx.install(&fx.item).unwrap();
+    put(&fx.prefix.join(core::PROGRAM).join("Fenix.exe"), "MZ");
+    put(
+        &fx.prefix.join(core::CONFIG).join("fenixConfig.xml"),
+        "<config><UserChoice>keep</UserChoice></config>",
+    );
+    put(
+        &fx.prefix.join(core::CONFIG).join("persistancy.xml"),
+        "<state/>",
+    );
+    fx.configure(&fx.item).unwrap();
+    let mut before = fx.state(&fx.item);
+    before.as_object_mut().unwrap().remove("display_renderer");
+    fsx::write_json(&fx.item.marker(), &before).unwrap();
+    let settings = fx.prefix.join(core::CONFIG).join("fenixConfig.xml");
+    let content = read(&settings);
+    fx.release();
+    let mut lock = fx.mock.lock();
+    lock["version"] = json!("0.1.0-preview.8");
+    gpu_overlay(
+        &fx.bundle.join("payload/variants/fixture"),
+        &mut lock["variants"]["fixture"],
+    );
+    fx.publish(&lock);
+    fx.install(&fx.item).unwrap();
+    let state = fx.state(&fx.item);
+    assert_eq!(state["version"], "0.1.0-preview.8");
+    assert_eq!(state["display_renderer"], "GPU");
+    assert_eq!(state["configured"], true);
+    assert_eq!(state["previous"], before["previous"]);
+    assert_eq!(fx.mock.setups.lock().unwrap().len(), 1);
+    assert_eq!(document(&settings).findtext("displayMode"), "GPU");
+    assert_eq!(document(&settings).findtext("UserChoice"), "keep");
+    let backups = glob(&fx.item.state(), "settings-");
+    assert!(
+        backups
+            .iter()
+            .any(|backup| read(&backup.join("fenixConfig.xml")) == content)
+    );
+    assert_eq!(
+        read(&fx.prefix.join("drive_c/windows/system32/dxgi.dll")),
+        read(
+            &fx.bundle
+                .join("payload/variants/fixture")
+                .join(core::DXGI_FILE)
+        ),
+    );
+    assert_eq!(fx.snapshot(&fx.item)["display_renderer"], "GPU");
+    steam::configure_with_renderer(
+        fx.mock.as_ref(),
+        &fx.item,
+        &silent,
+        Some(core::DisplayRenderer::Cpu),
+    )
+    .unwrap();
+    fx.configure(&fx.item).unwrap();
+    assert_eq!(fx.state(&fx.item)["display_renderer"], "CPU");
+    let mut lock = fx.mock.lock();
+    lock["variants"]["fixture"]["previous_releases"]["0.1.0-preview.8"] = json!({"files": lock["variants"]["fixture"]["files"], "prefix_files": lock["variants"]["fixture"]["prefix_files"]});
+    lock["version"] = json!("0.1.0-preview.9");
+    fx.publish(&lock);
+    fx.install(&fx.item).unwrap();
+    assert_eq!(fx.state(&fx.item)["display_renderer"], "CPU");
+    assert_eq!(fx.state(&fx.item)["display_renderer_override"], "CPU");
+    assert_eq!(document(&settings).findtext("displayMode"), "CPU");
 }
 
 #[test]

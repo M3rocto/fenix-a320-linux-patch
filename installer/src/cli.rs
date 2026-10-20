@@ -2,6 +2,7 @@
 //! The command line: the same commands, options, messages and exit codes as
 //! `python3 -m fenix_patch` had.
 use crate::{
+    core::DisplayRenderer,
     error::{Error, Result},
     guide::{self, Console},
     json::{self, Value, json},
@@ -54,6 +55,9 @@ pub struct Args {
     /// Official Fenix Installer downloaded from your account
     #[arg(long)]
     pub exe: Option<OsString>,
+    /// Save a display renderer preference for configure and future updates [default: saved choice or this overlay's renderer]
+    #[arg(long, value_parser = ["cpu", "gpu"])]
+    pub renderer: Option<String>,
     /// Emit structured progress for launchers
     #[arg(long)]
     pub json: bool,
@@ -168,6 +172,9 @@ fn usage_error(cli: &mut Cli, message: &str) -> i32 {
 }
 
 fn execute(cli: &mut Cli, args: &Args) -> Result<i32> {
+    if args.renderer.is_some() && args.command != "configure" {
+        return Ok(usage_error(cli, "--renderer applies to configure only"));
+    }
     let system = cli.system.clone();
     let bundle = args
         .bundle
@@ -267,7 +274,13 @@ fn execute(cli: &mut Cli, args: &Args) -> Result<i32> {
     match args.command.as_str() {
         "install" => target.install(&bundle, &progress, args.proton.as_deref())?,
         "select" => target.select(&progress)?,
-        "configure" => target.configure(&progress)?,
+        "configure" => target.configure_with_renderer(
+            &progress,
+            args.renderer.as_deref().map(|renderer| match renderer {
+                "gpu" => DisplayRenderer::Gpu,
+                _ => DisplayRenderer::Cpu,
+            }),
+        )?,
         "restore" => target.restore(&progress)?,
         "installer" => target.app(&progress, given(&args.exe), false)?,
         "open" => target.app(&progress, None, false)?,

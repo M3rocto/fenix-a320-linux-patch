@@ -20,6 +20,28 @@ jobs:
           cargo +1.98.0 clippy --locked --workspace --all-targets -- -D warnings
       - name: Installer and maintainer tool tests
         run: cargo +1.98.0 test --locked --workspace
+      - name: Fetch the complete pinned DXVK source archives
+        run: |
+          mkdir -p build
+          curl --fail --location --retry 30 --retry-all-errors --retry-delay 10 \
+            --output build/corresponding-source.tar.gz \
+            https://github.com/marselnenaj/fenix-a320-linux-patch/releases/download/v0.1.0-preview.8/fenix-a320-linux-patch-0.1.0-preview.8-source.tar.gz
+          python3 - <<'PY'
+          import hashlib, json, pathlib, tarfile
+          root = pathlib.Path('.')
+          bundle = json.loads((root / 'bundle.json').read_text())
+          with tarfile.open('build/corresponding-source.tar.gz') as archive:
+              for overlay in [bundle, *bundle['variants'].values()]:
+                  if 'dxvk' not in overlay:
+                      continue
+                  name = overlay['dxvk']['source']
+                  data = archive.extractfile(
+                      f'fenix-a320-linux-patch-0.1.0-preview.8/sources/{name}'
+                  ).read()
+                  assert hashlib.sha256(data).hexdigest() == overlay['sources'][name], name
+                  (root / 'sources').mkdir(exist_ok=True)
+                  (root / 'sources' / name).write_bytes(data)
+          PY
       - name: Verify the pinned sources and apply every patch
         run: |
           cargo +1.98.0 build --locked -p fenix-tools

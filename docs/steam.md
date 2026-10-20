@@ -37,7 +37,7 @@ example the earlier `cachyos-10.0-sunset-slr`.
    *Force the use of a specific Steam Play compatibility tool* and choose
    **Proton Fenix A320 (…)**. `status` reports whether Steam has this selection.
 4. Continue as usual: run the official Fenix Installer, open Fenix and sign in,
-   then apply the settings. This sets CPU displays and starts Fenix with the
+   then apply the settings. This sets the supported display renderer and starts Fenix with the
    simulator. Fenix may create the file for the Legacy FCU readouts only once
    the aircraft has been loaded; the setup then asks you to load it once and
    apply the setting again.
@@ -47,8 +47,10 @@ example the earlier `cachyos-10.0-sunset-slr`.
 Run `./install.sh` from the new release and choose **Update patch**, or
 `./install.sh install --steam msfs2024`. Close the simulator and Fenix first.
 The overlay in the *Proton Fenix A320* tool is replaced; the Windows profile,
-Fenix, its sign-in and settings are not touched, and Restore still returns the
-profile from before the first installation. When MSFS 2020 and 2024 share the
+Fenix and its sign-in are retained, and Restore still returns the
+profile from before the first installation. An automatic CPU setting migrates
+to GPU on the supported Proton 11 overlays; an explicit CPU fallback is retained.
+CachyOS Proton 10 remains CPU-only. When MSFS 2020 and 2024 share the
 tool, update both: the second one only records the new version.
 
 ```sh
@@ -59,12 +61,19 @@ tool, update both: the second one only records the new version.
 ./install.sh installer --steam msfs2024 --exe "$HOME/Downloads/FenixInstaller.exe"
 ./install.sh open      --steam msfs2024
 ./install.sh configure --steam msfs2024
+./install.sh configure --steam msfs2024 --renderer cpu
+./install.sh configure --steam msfs2024 --renderer gpu
 ./install.sh restore   --steam msfs2024
 ```
 
 Steam is found in `~/.local/share/Steam`, `~/.steam`, the Flatpak and the Snap
 locations, including additional libraries; `--steam-root` names another one.
 Flatpak and Snap Steam are detected but untested.
+
+`--renderer cpu|gpu` is a persistent preference. The GPU option requires a
+complete GPU-capable overlay for that exact Proton build; it cannot enable GPU
+on older or CPU-only overlays. See [GPU displays](gpu-displays.md) for the
+compatibility fixes and the remaining validation limits.
 
 ## What changes
 

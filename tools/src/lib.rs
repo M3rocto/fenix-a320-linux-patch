@@ -47,6 +47,8 @@ pub struct Programs {
     /// Runs Wine's own `make_vulkan` inside the Wine source tree.
     pub python3: OsString,
     pub make: OsString,
+    pub meson: OsString,
+    pub ninja: OsString,
     pub strip: OsString,
     pub mingw_strip: OsString,
     pub mingw_gcc: OsString,
@@ -62,6 +64,8 @@ impl Default for Programs {
             autoreconf: "autoreconf".into(),
             python3: "python3".into(),
             make: "make".into(),
+            meson: "meson".into(),
+            ninja: "ninja".into(),
             strip: "strip".into(),
             mingw_strip: "x86_64-w64-mingw32-strip".into(),
             mingw_gcc: "x86_64-w64-mingw32-gcc".into(),

@@ -53,6 +53,25 @@ pub fn digests(base: &Path, names: &[&str]) -> Value {
     Value::Object(map)
 }
 
+/// A complete synthetic owner-adapter overlay; its bytes are still checked by
+/// the real installer paths, just like any other pinned payload.
+pub fn gpu_overlay(payload: &Path, entry: &mut Value) {
+    for name in core::GPU_FILES {
+        let path = payload.join(name);
+        if !path.exists() {
+            put(&path, &format!("synthetic GPU {name}"));
+        }
+        entry["files"][name] = Value::String(digest(&path));
+    }
+    entry["dxvk"] = serde_json::json!({
+        "source": "fixture-dxvk.tar.gz",
+        "revision": "a".repeat(40),
+    });
+    entry["display_renderer"] = Value::String("GPU".to_string());
+    entry["prefix_files"]["drive_c/windows/system32/dxgi.dll"] =
+        entry["files"][core::DXGI_FILE].clone();
+}
+
 /// Paths below `base` whose name matches `prefix*`, as `Path.glob` in the Python tests.
 pub fn glob(base: &Path, prefix: &str) -> Vec<PathBuf> {
     let mut found: Vec<PathBuf> = fs::read_dir(base)
@@ -276,6 +295,12 @@ impl System for Mock {
                         .as_object()
                         .ok_or_else(|| Error::Key(variant.to_string()))?;
                     let mut merged = json::merged(lock.as_object().unwrap(), entry);
+                    if !entry.contains_key("dxvk") {
+                        merged.remove("dxvk");
+                    }
+                    if !entry.contains_key("display_renderer") {
+                        merged.remove("display_renderer");
+                    }
                     merged.insert("variant".to_string(), Value::String(variant.to_string()));
                     Ok(Value::Object(merged))
                 }

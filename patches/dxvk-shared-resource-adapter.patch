@@ -1,0 +1,88 @@
+diff --git i/src/dxgi/dxgi_factory.cpp w/src/dxgi/dxgi_factory.cpp
+index d89409e..e8f509f 100644
+--- i/src/dxgi/dxgi_factory.cpp
++++ w/src/dxgi/dxgi_factory.cpp
+@@ -418,8 +418,20 @@ namespace dxvk {
+   HRESULT STDMETHODCALLTYPE DxgiFactory::GetSharedResourceAdapterLuid(
+           HANDLE                hResource,
+           LUID*                 pLuid) {
+-    Logger::err("DxgiFactory::GetSharedResourceAdapterLuid: Not implemented");
+-    return E_NOTIMPL;
++    if (!pLuid)
++      return DXGI_ERROR_INVALID_CALL;
++
++    D3DKMT_GETSHAREDRESOURCEADAPTERLUID query = { };
++    if (reinterpret_cast<uintptr_t>(hResource) & 0xc0000000)
++      query.hGlobalShare = reinterpret_cast<uintptr_t>(hResource);
++    else
++      query.hNtHandle = hResource;
++
++    if (D3DKMTGetSharedResourceAdapterLuid(&query))
++      return DXGI_ERROR_INVALID_CALL;
++
++    *pLuid = query.AdapterLuid;
++    return S_OK;
+   }
+   
+   
+diff --git i/src/util/util_gdi.cpp w/src/util/util_gdi.cpp
+index 988d9d7..76f93b1 100644
+--- i/src/util/util_gdi.cpp
++++ w/src/util/util_gdi.cpp
+@@ -4,6 +4,10 @@
+ namespace dxvk {
+ 
+ #ifndef _WIN32
++  NTSTATUS WINAPI D3DKMTGetSharedResourceAdapterLuid(D3DKMT_GETSHAREDRESOURCEADAPTERLUID *desc) {
++    return -1;
++  }
++
+   NTSTATUS WINAPI D3DKMTAcquireKeyedMutex(D3DKMT_ACQUIREKEYEDMUTEX *desc) {
+     Logger::warn("D3DKMTAcquireKeyedMutex: Not available on this platform.");
+     return -1;
+@@ -109,6 +113,19 @@ namespace dxvk {
+     return -1;
+   }
+ #else
++  static NTSTATUS WINAPI NoD3DKMTGetSharedResourceAdapterLuid(D3DKMT_GETSHAREDRESOURCEADAPTERLUID *desc) {
++    return -1;
++  }
++
++  NTSTATUS WINAPI D3DKMTGetSharedResourceAdapterLuid(D3DKMT_GETSHAREDRESOURCEADAPTERLUID *desc) {
++    static decltype(D3DKMTGetSharedResourceAdapterLuid) *func;
++    if (!func) {
++      InterlockedCompareExchangePointer((void **)&func, (void *)GetProcAddress(GetModuleHandle("gdi32"), "D3DKMTGetSharedResourceAdapterLuid"), NULL);
++      InterlockedCompareExchangePointer((void **)&func, (void *)NoD3DKMTGetSharedResourceAdapterLuid, NULL);
++    }
++    return func(desc);
++  }
++
+   static NTSTATUS WINAPI NoD3DKMTAcquireKeyedMutex(D3DKMT_ACQUIREKEYEDMUTEX *desc) {
+     return -1;
+   }
+diff --git i/src/util/util_gdi.h w/src/util/util_gdi.h
+index b715e34..d5f7071 100644
+--- i/src/util/util_gdi.h
++++ w/src/util/util_gdi.h
+@@ -143,6 +143,13 @@ namespace dxvk {
+       D3DKMT_HANDLE hDevice;
+   } D3DKMT_DESTROYDEVICE;
+ 
++  typedef struct _D3DKMT_GETSHAREDRESOURCEADAPTERLUID
++  {
++      D3DKMT_HANDLE hGlobalShare;
++      HANDLE hNtHandle;
++      LUID AdapterLuid;
++  } D3DKMT_GETSHAREDRESOURCEADAPTERLUID;
++
+   typedef struct _D3DKMT_DESTROYKEYEDMUTEX
+   {
+       D3DKMT_HANDLE hKeyedMutex;
+@@ -447,6 +454,7 @@ namespace dxvk {
+   EXTERN_C WINBASEAPI NTSTATUS WINAPI D3DKMTOpenSynchronizationObject(D3DKMT_OPENSYNCHRONIZATIONOBJECT *desc);
+   EXTERN_C WINBASEAPI NTSTATUS WINAPI D3DKMTOpenSyncObjectFromNtHandle(D3DKMT_OPENSYNCOBJECTFROMNTHANDLE *desc);
+   EXTERN_C WINBASEAPI NTSTATUS WINAPI D3DKMTQueryResourceInfo(D3DKMT_QUERYRESOURCEINFO *desc);
++  NTSTATUS WINAPI D3DKMTGetSharedResourceAdapterLuid(D3DKMT_GETSHAREDRESOURCEADAPTERLUID *desc);
+   EXTERN_C WINBASEAPI NTSTATUS WINAPI D3DKMTQueryResourceInfoFromNtHandle(D3DKMT_QUERYRESOURCEINFOFROMNTHANDLE *desc);
+   NTSTATUS WINAPI D3DKMTReleaseKeyedMutex(D3DKMT_RELEASEKEYEDMUTEX *desc);
+   EXTERN_C WINBASEAPI NTSTATUS WINAPI D3DKMTShareObjects(UINT count, const D3DKMT_HANDLE *handles, OBJECT_ATTRIBUTES *attr, UINT access, HANDLE *handle);

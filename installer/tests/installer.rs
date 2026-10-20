@@ -4,8 +4,8 @@
 mod common;
 
 use common::{
-    Manifest, Messages, Mock, MockWine, WineCalls, assert_patch_error, digest, digests, glob, put,
-    read,
+    Manifest, Messages, Mock, MockWine, WineCalls, assert_patch_error, digest, digests, glob,
+    gpu_overlay, put, read,
 };
 use fenix_patch::{
     Error,
@@ -330,7 +330,10 @@ fn configure_reports_the_readout_setting_separately() {
         .prefix
         .join("drive_c/users/test/AppData/Roaming/Microsoft Flight Simulator 2024");
     fs::create_dir_all(&directory).unwrap();
-    let configure = || core::configure_prefix(&fx.prefix, core::DEFAULT_FOLDER).unwrap();
+    let configure = || {
+        core::configure_prefix(&fx.prefix, core::DEFAULT_FOLDER, core::DisplayRenderer::Cpu)
+            .unwrap()
+    };
     let config = fx.prefix.join(core::CONFIG);
     assert_eq!(configure(), (false, false));
     put(
@@ -356,27 +359,211 @@ fn configure_reports_the_readout_setting_separately() {
     );
     let mut state = fenix_patch::json::Map::new();
     assert!(
-        core::apply_settings(&mut state, &fx.prefix, core::DEFAULT_FOLDER)
-            .unwrap()
-            .contains("load the aircraft once")
+        core::apply_settings(
+            &mut state,
+            &fx.prefix,
+            core::DEFAULT_FOLDER,
+            core::DisplayRenderer::Cpu
+        )
+        .unwrap()
+        .contains("load the aircraft once")
     );
     assert_eq!(
         Value::Object(state.clone()),
-        json!({"configured": true, "readouts": false})
+        json!({"configured": true, "readouts": false, "display_renderer": "CPU"})
     );
     put(&config.join("persistancy.xml"), "<Settings/>");
     assert!(
-        core::apply_settings(&mut state, &fx.prefix, core::DEFAULT_FOLDER)
-            .unwrap()
-            .contains("Legacy readouts")
+        core::apply_settings(
+            &mut state,
+            &fx.prefix,
+            core::DEFAULT_FOLDER,
+            core::DisplayRenderer::Cpu
+        )
+        .unwrap()
+        .contains("Legacy readouts")
     );
     assert_eq!(
         Value::Object(state),
-        json!({"configured": true, "readouts": true})
+        json!({"configured": true, "readouts": true, "display_renderer": "CPU"})
     );
     // States written before the separate key meant both settings.
     assert!(core::readouts_set(&json!({"configured": true})));
     assert!(!core::readouts_set(&json!({"configured": false})));
+}
+
+#[test]
+fn gpu_renderer_requires_its_own_complete_verified_overlay() {
+    use core::DisplayRenderer::{Cpu, Gpu};
+    let fx = Fixture::new();
+    let mut lock = fx.mock.lock();
+    assert_eq!(core::DisplayRenderer::from_manifest(&lock).unwrap(), Cpu);
+    assert_patch_error(
+        core::DisplayRenderer::select(&lock, Some(Gpu)),
+        "CPU displays only",
+    );
+    lock["display_renderer"] = json!("GPU");
+    assert_patch_error(
+        core::DisplayRenderer::from_manifest(&lock),
+        "complete matched Wine and DXGI",
+    );
+    lock["dxvk"] = json!({"revision": "fixture"});
+    assert_patch_error(
+        core::DisplayRenderer::from_manifest(&lock),
+        "complete matched Wine and DXGI",
+    );
+    gpu_overlay(&fx.bundle.join("payload"), &mut lock);
+    assert_eq!(core::DisplayRenderer::from_manifest(&lock).unwrap(), Gpu);
+    assert_eq!(
+        core::DisplayRenderer::select(&lock, Some(Cpu)).unwrap(),
+        Cpu
+    );
+    lock["variants"] = json!({
+        "legacy": {"files": {}},
+        "own-dxvk": {"dxvk": lock["dxvk"], "files": lock["files"]},
+        "unsupported": {"display_renderer": "GPU", "files": lock["files"]},
+        "gpu": {"display_renderer": "GPU", "dxvk": lock["dxvk"], "files": lock["files"]},
+    });
+    fx.publish(&lock);
+    for variant in ["legacy", "own-dxvk"] {
+        let entry = core::read_manifest(&fx.bundle, Some(variant)).unwrap();
+        assert!(entry.get("display_renderer").is_none());
+        assert_eq!(core::DisplayRenderer::from_manifest(&entry).unwrap(), Cpu);
+        if variant == "legacy" {
+            assert!(entry.get("dxvk").is_none());
+        }
+    }
+    let entry = core::read_manifest(&fx.bundle, Some("unsupported")).unwrap();
+    assert_patch_error(
+        core::DisplayRenderer::from_manifest(&entry),
+        "complete matched Wine and DXGI",
+    );
+    let entry = core::read_manifest(&fx.bundle, Some("gpu")).unwrap();
+    assert_eq!(core::DisplayRenderer::from_manifest(&entry).unwrap(), Gpu);
+    // A capability flag never bypasses payload integrity checking.
+    put(
+        &fx.bundle.join("payload").join(core::DXGI_FILE),
+        "tampered DXGI",
+    );
+    assert_patch_error(fx.install(), "checksum mismatch");
+    assert!(!fx.marker().exists());
+    assert_eq!(fx.active_runner(), fx.runner);
+}
+
+#[test]
+fn gpu_overlay_replaces_native_dxgi_symlinks_without_touching_their_targets() {
+    let fx = Fixture::new();
+    let mut lock = fx.mock.lock();
+    gpu_overlay(&fx.bundle.join("payload"), &mut lock);
+    fx.publish(&lock);
+    let outside = fx.base.join("shared native dxgi.dll");
+    put(&outside, "original shared native DXGI");
+    let native = fx.prefix.join("drive_c/windows/system32/dxgi.dll");
+    symlink(&outside, &native).unwrap();
+    fx.install().unwrap();
+    let expected = read(&fx.bundle.join("payload").join(core::DXGI_FILE));
+    assert!(!native.is_symlink());
+    assert_eq!(read(&native), expected);
+    assert_eq!(read(&fx.active_runner().join(core::DXGI_FILE)), expected);
+    assert_eq!(read(&outside), "original shared native DXGI");
+    fx.restore().unwrap();
+    assert!(native.is_symlink());
+    assert_eq!(fs::read_link(&native).unwrap(), outside);
+}
+
+#[test]
+fn upgrading_cpu_displays_applies_gpu_settings_and_preserves_the_previous_settings() {
+    let fx = Fixture::new();
+    let mut lock = fx.mock.lock();
+    lock["version"] = json!("0.1.0-preview.7");
+    fx.publish(&lock);
+    put(
+        &fx.prefix.join(core::PROGRAM).join("Fenix.exe"),
+        "synthetic app",
+    );
+    put(
+        &fx.prefix.join(core::CONFIG).join("fenixConfig.xml"),
+        "<Config><UserChoice>keep</UserChoice></Config>",
+    );
+    put(
+        &fx.prefix.join(core::CONFIG).join("persistancy.xml"),
+        "<Settings/>",
+    );
+    fs::create_dir_all(
+        fx.prefix
+            .join("drive_c/users/test/AppData/Roaming")
+            .join(core::DEFAULT_FOLDER),
+    )
+    .unwrap();
+    let mut previous = fx.prepare_upgrade();
+    assert_eq!(previous["display_renderer"], "CPU");
+    // Shipping preview.7 states predate the renderer capability metadata.
+    previous.as_object_mut().unwrap().remove("display_renderer");
+    fsx::write_json(&fx.marker(), &previous).unwrap();
+    let settings = fx.prefix.join(core::CONFIG).join("fenixConfig.xml");
+    let before = read(&settings);
+    let mut lock = fx.mock.lock();
+    lock["version"] = json!("0.1.0-preview.8");
+    gpu_overlay(&fx.bundle.join("payload"), &mut lock);
+    fx.publish(&lock);
+    fx.install().unwrap();
+    let state = fx.state();
+    assert_eq!(state["configured"], true);
+    assert_eq!(state["version"], "0.1.0-preview.8");
+    assert_eq!(state["display_renderer"], "GPU");
+    assert_eq!(fx.snapshot()["display_renderer"], "GPU");
+    let config = document(&settings);
+    for (tag, value) in [
+        ("displayMode", "GPU"),
+        ("newRender", "true"),
+        ("preferCPU", "false"),
+        ("multithread", "true"),
+        ("UserChoice", "keep"),
+    ] {
+        assert_eq!(config.findtext(tag), value);
+    }
+    assert_eq!(
+        document(&fx.prefix.join(core::CONFIG).join("persistancy.xml")).findtext("fcuReadoutsType"),
+        "0"
+    );
+    let backup = fx.root.join(state["upgrade_backup"].as_str().unwrap());
+    assert_eq!(
+        read(&backup.join("settings-before-update/fenixConfig.xml")),
+        before
+    );
+    assert_eq!(state["backup"], previous["backup"]);
+    core::configure_with_renderer(
+        &fx.mock,
+        fx.root.as_os_str(),
+        &silent,
+        Some(core::DisplayRenderer::Cpu),
+    )
+    .unwrap();
+    assert_eq!(fx.state()["display_renderer"], "CPU");
+    let config = document(&settings);
+    assert_eq!(config.findtext("displayMode"), "CPU");
+    assert_eq!(config.findtext("newRender"), "false");
+    assert_eq!(config.findtext("preferCPU"), "true");
+    core::configure(&fx.mock, fx.root.as_os_str(), &silent).unwrap();
+    assert_eq!(fx.state()["display_renderer"], "CPU");
+    assert_eq!(fx.state()["display_renderer_override"], "CPU");
+    let mut lock = fx.mock.lock();
+    lock["previous_releases"]["0.1.0-preview.8"] = json!({"files": lock["files"], "prefix_files": lock["prefix_files"], "integration": lock["integration"]});
+    lock["version"] = json!("0.1.0-preview.9");
+    fx.publish(&lock);
+    fx.install().unwrap();
+    assert_eq!(fx.state()["display_renderer"], "CPU");
+    assert_eq!(fx.state()["display_renderer_override"], "CPU");
+    assert_eq!(document(&settings).findtext("displayMode"), "CPU");
+    core::configure_with_renderer(
+        &fx.mock,
+        fx.root.as_os_str(),
+        &silent,
+        Some(core::DisplayRenderer::Gpu),
+    )
+    .unwrap();
+    assert_eq!(fx.state()["display_renderer_override"], "GPU");
+    assert_eq!(fx.state()["display_renderer"], "GPU");
 }
 
 #[test]
@@ -791,11 +978,13 @@ fn configure_preserves_unrelated_xml_and_autostart_entries() {
         "<SimBase.Document><Launch.Addon><Name>Other addon</Name><Path>C:\\Other.exe</Path></Launch.Addon></SimBase.Document>",
     );
     assert_eq!(
-        core::configure_prefix(&fx.prefix, core::DEFAULT_FOLDER).unwrap(),
+        core::configure_prefix(&fx.prefix, core::DEFAULT_FOLDER, core::DisplayRenderer::Cpu)
+            .unwrap(),
         (true, true)
     );
     assert_eq!(
-        core::configure_prefix(&fx.prefix, core::DEFAULT_FOLDER).unwrap(),
+        core::configure_prefix(&fx.prefix, core::DEFAULT_FOLDER, core::DisplayRenderer::Cpu)
+            .unwrap(),
         (true, true)
     );
     let settings = document(&config.join("fenixConfig.xml"));

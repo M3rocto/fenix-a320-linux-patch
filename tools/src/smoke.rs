@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: MIT
 //! `fenix-tools smoke`: run own-code probes against the release binaries in a
 //! fresh disposable prefix.
-use crate::{Context, build::value, util, x11::check_host_windows};
+use crate::{
+    Context,
+    build::{prepare_dxvk, value},
+    util,
+    x11::check_host_windows,
+};
 use fenix_patch::{
     Error, Result, argv,
     core::{self, RealWine},
@@ -259,6 +264,133 @@ impl Stage<'_, '_> {
         util::read_text(&path)
     }
 
+    fn virtual_fences(&self) -> bool {
+        self.options
+            .variant
+            .as_deref()
+            .is_some_and(|variant| matches!(variant, "experimental-11" | "cachyos-11"))
+    }
+
+    /// Check timeout, reimport and rewind-history behavior directly through
+    /// Wine Vulkan, using the exact headers already included with DXVK.
+    fn virtual_fence_probes(&self, env: &Env) -> Result<()> {
+        let ctx = self.ctx;
+        let lock = ctx.system.manifest(self.options.variant.as_deref())?;
+        let source = prepare_dxvk(ctx, &lock, self.work, &ctx.system.environ())?
+            .ok_or_else(|| value("Virtual fence probes need the overlay's pinned DXVK headers"))?;
+        let name = "vulkan-shared-fence-context";
+        let target = self.work.join(format!("{name}.exe"));
+        self.host(
+            argv![
+                &ctx.programs.mingw_gxx,
+                "-std=c++17",
+                "-O2",
+                "-static",
+                "-Wall",
+                "-Wextra",
+                "-Werror",
+                "-I",
+                source.join("include/vulkan/include"),
+                "-o",
+                &target,
+                ctx.root().join("tests/vulkan-shared-fence-context.cpp")
+            ]
+            .to_vec(),
+        )?;
+        for case in ["values", "batch-peak", "reset-history"] {
+            let log = format!("{name}-{case}");
+            let text = self.logged(&log, &argv![&target, case], env)?;
+            ctx.print(&format!("{log}:\n{text}"))?;
+        }
+        Ok(())
+    }
+
+    /// Exercise the actual native DXGI/D3D11 and VKD3D-Proton path. Wine's
+    /// built-in D3D libraries do not implement the display sharing contract.
+    fn gpu_probes(&self, env: &Env) -> Result<()> {
+        let (ctx, work, runner, prefix) = (self.ctx, self.work, self.runner, self.prefix);
+        for (folder, names) in [
+            ("dxvk", &["dxgi.dll", "d3d11.dll"][..]),
+            ("vkd3d-proton", &["d3d12.dll", "d3d12core.dll"][..]),
+        ] {
+            for name in names {
+                let source = runner.join(format!("files/lib/wine/{folder}/x86_64-windows/{name}"));
+                let target = prefix.join("drive_c/windows/system32").join(name);
+                fsx::unlink(&target)?;
+                fsx::copy2(&source, &target)?;
+            }
+        }
+        let gpu_env = env.with(&[
+            (
+                "WINEDLLOVERRIDES",
+                "d3d11,dxgi,d3d12,d3d12core=n;winemenubuilder.exe=d;mscoree,mshtml=",
+            ),
+            ("DXVK_LOG_LEVEL", "warn"),
+            ("VKD3D_DEBUG", "none"),
+        ]);
+        for name in [
+            "dxgi-shared-resource-luid",
+            "dxgi-d3d12-display-interop",
+            "dxgi-shared-fence-values",
+        ] {
+            let target = work.join(format!("{name}.exe"));
+            self.host(
+                argv![
+                    &ctx.programs.mingw_gxx,
+                    "-std=c++17",
+                    "-O2",
+                    "-static",
+                    "-o",
+                    &target,
+                    ctx.root().join("tests").join(format!("{name}.cpp")),
+                    "-ld3d12",
+                    "-ld3d11",
+                    "-ldxgi",
+                    "-ldxguid"
+                ]
+                .to_vec(),
+            )?;
+            let runs = match name {
+                "dxgi-shared-fence-values" => {
+                    let mut runs = vec![
+                        ("dense", argv![&target, "dense"].to_vec()),
+                        ("strided", argv![&target, "strided"].to_vec()),
+                    ];
+                    // The original Xodus backend uses the physical Vulkan
+                    // timeline and already cannot rewind even its local fence.
+                    // Proton 11 virtualizes values; its shared-context fix must
+                    // also preserve decreasing values across processes.
+                    if self.virtual_fences() {
+                        for case in [
+                            "rewind",
+                            "initial",
+                            "initial-high",
+                            "lifetime",
+                            "creator-exit",
+                            "legacy-reject",
+                        ] {
+                            runs.push((case, argv![&target, case].to_vec()));
+                        }
+                    }
+                    runs
+                }
+                "dxgi-d3d12-display-interop" => {
+                    vec![("frames", argv![&target, "--frames", "1000"].to_vec())]
+                }
+                _ => vec![("owner", argv![&target].to_vec())],
+            };
+            for (case, arguments) in runs {
+                let log = format!("{name}-{case}");
+                let text = self.logged(&log, &arguments, &gpu_env)?;
+                ctx.print(&format!("{log}:\n{text}"))?;
+            }
+        }
+        if self.virtual_fences() {
+            self.virtual_fence_probes(&gpu_env)?;
+        }
+        Ok(())
+    }
+
     fn probes(&self, env: &mut Env) -> Result<()> {
         let (ctx, work, runner, prefix) = (self.ctx, self.work, self.runner, self.prefix);
         let root = ctx.root();
@@ -399,6 +531,10 @@ impl Stage<'_, '_> {
             if name == "path-metrics-probe" {
                 self.wine(&argv![&target, "--disabled"], ctx.shown(), env)?;
             }
+        }
+        let lock = ctx.system.manifest(self.options.variant.as_deref())?;
+        if lock.item("dxvk").is_some() {
+            self.gpu_probes(env)?;
         }
         Ok(())
     }

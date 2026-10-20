@@ -8,8 +8,9 @@ use common::{Lab, Run, Tree, VARIANT, World, calls, digest, put, read, snapshot}
 use fenix_patch::{
     Error,
     download::{Message, Stream},
-    json::Value,
+    json::{Value, json},
 };
+use fenix_tools::build::{DXGI_FILE, GPU_TARGETS};
 use std::{
     fs,
     os::unix::fs::symlink,
@@ -38,6 +39,8 @@ const INSTALLED: [&str; 11] = [
 ];
 
 const CONFIGURE: &str = "[--enable-win64] [--disable-tests] [--enable-silent-rules] [--without-ffmpeg] [--without-unwind]";
+const DXVK_REVISION: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const DXVK_SOURCE: &str = "dxvk-aaaaaaaaaaaaaaa.tar.gz";
 
 struct Fixture {
     lab: Lab,
@@ -66,6 +69,63 @@ impl Fixture {
     fn calls(&self) -> Vec<String> {
         calls(&self.lab.base, &self.tree.root)
     }
+}
+
+fn dxvk_archive(missing_vulkan: bool) -> Vec<u8> {
+    let top = format!("dxvk-{DXVK_REVISION}");
+    let files = [
+        ("meson.build", "project('dxvk', ['c', 'cpp'])\n"),
+        ("build-win64.txt", "[host_machine]\nsystem = 'windows'\n"),
+        ("LICENSE", "zlib/libpng license\n"),
+        (
+            ".gitmodules",
+            "[submodule \"include/vulkan\"]\n path = include/vulkan\n[submodule \"subprojects/dxbc-spirv\"]\n path = subprojects/dxbc-spirv\n",
+        ),
+        ("include/vulkan/include/vulkan.h", "/* pinned headers */\n"),
+        (
+            "subprojects/dxbc-spirv/.gitmodules",
+            "[submodule \"spirv_headers\"]\n path = submodules/spirv_headers\n",
+        ),
+        ("subprojects/dxbc-spirv/meson.build", "# pinned compiler\n"),
+        (
+            "subprojects/dxbc-spirv/submodules/spirv_headers/h",
+            "/* recursively pinned headers */\n",
+        ),
+    ];
+    let names: Vec<String> = files
+        .iter()
+        .map(|(name, _)| format!("{top}/{name}"))
+        .collect();
+    let members: Vec<common::Raw<'_>> = files
+        .iter()
+        .zip(&names)
+        .filter(|((name, _), _)| !missing_vulkan || !name.starts_with("include/vulkan/"))
+        .map(|((_, content), name)| common::Raw::file(name, 0o644, content.as_bytes()))
+        .collect();
+    common::gzip(&common::tar(&members))
+}
+
+fn add_dxvk(fixture: &Fixture, variant: bool) {
+    let root = &fixture.tree.root;
+    let archive = root.join("sources").join(DXVK_SOURCE);
+    put(&archive, dxvk_archive(false));
+    let patch = root.join("patches/dxvk.patch");
+    put(&patch, "# owner-adapter factory patch\n");
+    fixture.tree.edit(|lock| {
+        let entry = if variant { &mut lock["variants"][VARIANT] } else { lock };
+        entry["sources"][DXVK_SOURCE] = digest(&archive).into();
+        entry["dxvk"] = json!({
+            "revision": DXVK_REVISION,
+            "source": DXVK_SOURCE,
+            "source_root": format!("dxvk-{DXVK_REVISION}"),
+            "submodules": {
+                "include/vulkan": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "subprojects/dxbc-spirv": "cccccccccccccccccccccccccccccccccccccccc",
+                "subprojects/dxbc-spirv/submodules/spirv_headers": "dddddddddddddddddddddddddddddddddddddddd",
+            },
+            "patches": { "dxvk.patch": digest(&patch) },
+        });
+    });
 }
 
 /// The commands after the patches, for a build in `<ROOT>/{out}` with `flags`.
@@ -682,6 +742,192 @@ fn a_missing_proton_source_comes_from_the_repository_bundle_json_names() {
     );
     assert_eq!(fs::read(&archive).unwrap(), content);
     assert!(out.join("wine/README").is_file());
+}
+
+#[test]
+fn gpu_builds_record_the_gdi_abi_partners_and_only_same_version_dxgi() {
+    for variant in [false, true] {
+        let fixture = Fixture::new();
+        add_dxvk(&fixture, variant);
+        let root = &fixture.tree.root;
+        let payload = if variant {
+            root.join("payload/variants").join(VARIANT)
+        } else {
+            root.join("payload")
+        };
+        let d3d11 = payload.join("files/lib/wine/dxvk/x86_64-windows/d3d11.dll");
+        put(&d3d11, "original runner D3D11\n");
+        let before = fixture.tree.lock();
+        let out = root.join("gpu-build");
+        let outcome = if variant {
+            proton(&fixture, &out, &["--record-build", "--jobs", "2"])
+        } else {
+            fixture.run().tools(&[
+                "build",
+                "--record-build",
+                "--jobs",
+                "2",
+                "--build-dir",
+                out.to_str().unwrap(),
+            ])
+        };
+        assert_eq!((outcome.code, outcome.output.as_str()), (0, ""));
+        let after = fixture.tree.lock();
+        let entry = if variant {
+            &after["variants"][VARIANT]
+        } else {
+            &after
+        };
+        assert_eq!(entry["files"].as_object().unwrap().len(), 15);
+        for (_, relative) in GPU_TARGETS {
+            assert_eq!(entry["files"][relative], digest(&payload.join(relative)));
+        }
+        assert_eq!(entry["files"][DXGI_FILE], digest(&payload.join(DXGI_FILE)));
+        assert_eq!(
+            read(&payload.join(DXGI_FILE)),
+            "built src/dxgi/dxgi.dll\nstripped by x86_64-w64-mingw32-strip\n"
+        );
+        assert_eq!(read(&d3d11), "original runner D3D11\n");
+        assert_eq!(
+            read(&out.join(format!("dxvk-{DXVK_REVISION}/applied-patches.txt"))),
+            "dxvk.patch\n"
+        );
+        if variant {
+            assert_eq!(after["files"], before["files"]);
+            assert_eq!(after["integration"], before["integration"]);
+        } else {
+            assert_eq!(after["variants"], before["variants"]);
+        }
+        let calls = fixture.calls();
+        let meson = calls
+            .iter()
+            .find(|call| call.starts_with("meson "))
+            .unwrap();
+        for argument in [
+            "[--buildtype=release]",
+            "[--wrap-mode=nodownload]",
+            "[--force-fallback-for=libdisplay-info]",
+            "[-Denable_dxgi=true]",
+            "[-Denable_d3d11=false]",
+            "[-Dcpp_link_args=-Wl,--no-insert-timestamp]",
+        ] {
+            assert!(meson.contains(argument), "{meson}");
+        }
+        assert!(meson.contains("-ffile-prefix-map="), "{meson}");
+        assert!(!meson.contains("-O2"), "{meson}");
+        assert!(
+            meson.contains("GIT_CEILING_DIRECTORIES=<ROOT>/gpu-build"),
+            "{meson}"
+        );
+        let ninja = calls
+            .iter()
+            .find(|call| call.starts_with("ninja "))
+            .unwrap();
+        assert!(ninja.contains("[-j2] [src/dxgi/dxgi.dll]"), "{ninja}");
+        let strip_dxgi = calls
+            .iter()
+            .find(|call| call.starts_with("x86_64-w64-mingw32-strip ") && call.contains(DXGI_FILE))
+            .unwrap();
+        assert!(strip_dxgi.contains("SOURCE_DATE_EPOCH=0"), "{strip_dxgi}");
+        let make = calls
+            .iter()
+            .find(|call| call.starts_with("make [-j"))
+            .unwrap();
+        for (target, _) in GPU_TARGETS {
+            assert!(make.contains(&format!("[{target}]")), "{make}");
+        }
+    }
+}
+
+#[test]
+fn gpu_preparation_checks_recursive_source_and_patch_pins_without_downloads() {
+    let fixture = Fixture::new();
+    add_dxvk(&fixture, false);
+    let root = &fixture.tree.root;
+    let prepare = |directory: &str| {
+        fixture.run().tools(&[
+            "build",
+            "--prepare-only",
+            "--build-dir",
+            root.join(directory).to_str().unwrap(),
+        ])
+    };
+    let outcome = prepare("gpu-prepare");
+    assert_eq!((outcome.code, outcome.output.as_str()), (0, ""));
+    assert!(!root.join("gpu-prepare/objects").exists());
+    assert!(!root.join("gpu-prepare/dxvk-objects").exists());
+    assert!(
+        fixture
+            .calls()
+            .iter()
+            .all(|call| call.starts_with("patch "))
+    );
+
+    // A codeload-shaped archive is insufficient even when its digest matches.
+    let archive = root.join("sources").join(DXVK_SOURCE);
+    put(&archive, dxvk_archive(true));
+    fixture
+        .tree
+        .edit(|lock| lock["sources"][DXVK_SOURCE] = digest(&archive).into());
+    let outcome = prepare("gpu-missing-submodule");
+    assert_eq!(
+        (outcome.code, outcome.output),
+        (1, failure("Missing DXVK submodule source: include/vulkan"))
+    );
+    put(&archive, dxvk_archive(false));
+    fixture.tree.edit(|lock| {
+        lock["sources"][DXVK_SOURCE] = digest(&archive).into();
+        lock["dxvk"]["submodules"]
+            .as_object_mut()
+            .unwrap()
+            .remove("subprojects/dxbc-spirv/submodules/spirv_headers");
+    });
+    let outcome = prepare("gpu-unpinned-submodule");
+    assert_eq!(
+        (outcome.code, outcome.output),
+        (
+            1,
+            failure("Unpinned DXVK submodule: subprojects/dxbc-spirv/submodules/spirv_headers")
+        )
+    );
+
+    add_dxvk(&fixture, false);
+    put(&root.join("patches/dxvk.patch"), "changed patch\n");
+    let outcome = prepare("gpu-changed-patch");
+    assert_eq!(
+        (outcome.code, outcome.output),
+        (1, failure("DXVK patch checksum mismatch: dxvk.patch"))
+    );
+    fs::remove_file(&archive).unwrap();
+    let outcome = prepare("gpu-missing-archive");
+    assert_eq!(
+        (outcome.code, outcome.output),
+        (
+            1,
+            failure(&format!(
+                "Missing complete DXVK source archive: sources/{DXVK_SOURCE}. Extract it from the matching release; GitHub codeload omits its pinned submodules."
+            ))
+        )
+    );
+    assert!(!root.join("gpu-missing-archive").exists());
+}
+
+#[test]
+fn a_legacy_proton_build_does_not_inherit_the_base_dxvk_capability() {
+    let fixture = Fixture::new();
+    add_dxvk(&fixture, false);
+    let outcome = proton(
+        &fixture,
+        &fixture.tree.root.join("legacy"),
+        &["--record-build", "--jobs", "1"],
+    );
+    assert_eq!((outcome.code, outcome.output.as_str()), (0, ""));
+    assert_eq!(fixture.calls(), proton_calls("legacy", "1"));
+    let lock = fixture.tree.lock();
+    let entry = &lock["variants"][VARIANT];
+    assert_eq!(entry["files"].as_object().unwrap().len(), 11);
+    assert!(entry.get("dxvk").is_none());
+    assert!(!fixture.tree.root.join("legacy/dxvk-objects").exists());
 }
 
 #[test]

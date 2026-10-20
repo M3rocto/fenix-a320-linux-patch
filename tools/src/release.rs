@@ -351,6 +351,15 @@ pub fn run(ctx: &Context<'_>, options: &Options) -> Result<()> {
                 }
             }
         }
+        if let Some(dxvk) = entry.get("dxvk") {
+            for (name, expected) in &dxvk.need_table("patches")? {
+                if !json::is_text(expected, &fsx::digest(&root.join("patches").join(name))?) {
+                    return Err(Error::Value(format!(
+                        "DXVK patch checksum mismatch: {name}"
+                    )));
+                }
+            }
+        }
         for name in entry.need_table("sources")?.keys() {
             let archive = root.join("sources").join(name);
             if !archives.contains(&archive) {

@@ -27,8 +27,10 @@ aktualisieren** an Ort und Stelle: Profil, Fenix, Anmeldung und Einstellungen
 bleiben erhalten. preview.5 startete den Simulator aus Steam nicht, weil eine
 Bibliothek im Steam-Container fehlte.
 
-Seit preview.7 ist der Installer ein einzelnes Programm ohne Python. Die
-Wine-Module und Helfer sind unverändert die von preview.6.
+Seit preview.7 ist der Installer ein einzelnes Programm ohne Python.
+preview.8 ergänzt GPU-Anzeigen für die festgelegten Xodus- und
+Proton-11-Versionen. CachyOS Proton 10 bleibt beim CPU-Modus.
+[GPU-Korrekturen und Prüfstand](gpu-displays.md).
 
 Der Installer legt das eigene Proton an, weil Steam Proton Experimental laufend
 aktualisiert und die Korrekturen zu genau einem Wine-Stand gehören. Andere
@@ -52,7 +54,7 @@ dieselben Schritte:
 2. Den offiziellen Fenix-Installer aus dem eigenen Fenix-Konto auswählen und
    die normale Installation einschließlich der angebotenen Voraussetzungen abschließen.
 3. Fenix öffnen, anmelden und aktivieren. Anschließend Fenix samt Helfern schließen.
-4. CPU-Anzeigen und Legacy-Readouts anwenden. Danach MSFS über Flightdeck starten.
+4. Unterstützten Anzeige-Renderer und Legacy-Readouts anwenden. Danach MSFS über Flightdeck starten.
    Fehlen die Readout-Einstellungen von Fenix noch, das Flugzeug einmal laden
    und die Einstellung erneut anwenden.
 
@@ -69,8 +71,19 @@ Python 3.10+. Keine Root-Rechte nötig.
 
 Getestet: Fenix 2.4.0.4720, MSFS 2024 1.8.16.0, Xodus Wine 11.0 und Hyprland.
 Die Cockpitanzeigen wurden im laufenden Flugzeug geprüft. Ein vollständiger
-Testflug steht noch aus. Wetterradar wird im verwendeten CPU-Modus nicht unterstützt.
+Testflug steht noch aus. Der GPU-Modus wurde im Xodus-Cockpit mit PFD, ND, ECAM
+und bewegter Geschwindigkeitsanzeige geprüft. NVIDIA und GPU-Wetterradar sind
+noch nicht geprüft. Im CPU-Modus ist Wetterradar nicht verfügbar.
 Helligkeit und Flugmodi stellst du wie üblich im Cockpit ein.
+
+Beim Upgrade wechselt eine bislang automatisch gesetzte CPU-Konfiguration zu
+GPU, sofern die gewählte Version das unterstützt. Bei Problemen setzt
+`./install.sh configure --steam msfs2024 --renderer cpu` dauerhaft CPU;
+`--renderer gpu` schaltet wieder auf GPU. Für ältere Flightdeck-Runtimes
+statt `--steam msfs2024` den Parameter `--runtime /pfad/zur/runtime` verwenden.
+Die ausdrückliche Wahl bleibt bei erneuter Einrichtung und Updates erhalten.
+Das aktuelle Flightdeck verwendet seine eigene Einrichtung und benötigt eine
+Version mit den neuen Bundle-Pins und derselben Renderer-Unterstützung.
 
 „Wiederherstellen“ setzt Runner, Startskripte und das Windows-Profil auf den
 Stand vor dem Patch zurück. Das neuere Profil bleibt als lokale Sicherung erhalten.
@@ -78,8 +91,8 @@ Außerhalb des Profils installierte Community-Inhalte werden nicht entfernt.
 Bei einer unterbrochenen Einrichtung bleibt diese Funktion ebenfalls verfügbar.
 
 Das Downloadpaket enthält keine Fenix-/Microsoft-Programme, Flugzeuge, Fonts,
-Kontodaten oder privaten Profile. Es enthält den Installer, die Wine-Patches,
-Wine-Binärmodule sowie deren vollständige Quellarchive und Bauanleitung.
+Kontodaten oder privaten Profile. Es enthält den Installer, Wine-/DXVK-Patches,
+die zugehörigen Binärmodule sowie vollständige Quellarchive und Bauanleitung.
 
 Preview.3 ergänzt die Korrekturen für fehlende Routen und überlange Linien.
 Unter X11/Xwayland werden die passenden Fenix-Hilfsfenster direkt im Wine-Treiber

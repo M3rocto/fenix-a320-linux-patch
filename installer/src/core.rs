@@ -79,6 +79,87 @@ pub const GEOMETRY_PATH: &str = "drive_c/windows/system32/d2d1_geometry.dll";
 const SCRIPTS: [&str; 2] = ["launch-msfs.sh", "xodus-wine-launch"];
 const NO_BUILD: &str = "No Fenix compatibility build is available for this Proton version.";
 
+pub const DXGI_FILE: &str = "files/lib/wine/dxvk/x86_64-windows/dxgi.dll";
+/// Every ABI partner of the owner-adapter query must be supplied together.
+pub const GPU_FILES: [&str; 8] = [
+    "files/lib/wine/x86_64-windows/ntdll.dll",
+    "files/lib/wine/x86_64-unix/ntdll.so",
+    "files/bin/wineserver",
+    "files/lib/wine/x86_64-windows/gdi32.dll",
+    "files/lib/wine/x86_64-windows/win32u.dll",
+    "files/lib/wine/x86_64-unix/win32u.so",
+    "files/lib/wine/x86_64-windows/wow64win.dll",
+    DXGI_FILE,
+];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DisplayRenderer {
+    Cpu,
+    Gpu,
+}
+
+impl DisplayRenderer {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Cpu => "CPU",
+            Self::Gpu => "GPU",
+        }
+    }
+
+    /// Missing metadata is an older, CPU-only overlay. GPU is an explicit
+    /// capability of a complete, pinned Wine/DXGI overlay, never an override.
+    pub fn from_manifest(lock: &Value) -> Result<Self> {
+        match lock.item("display_renderer") {
+            None => Ok(Self::Cpu),
+            Some(value) if value.as_str() == Some("CPU") => Ok(Self::Cpu),
+            Some(value) if value.as_str() == Some("GPU") => {
+                let dxvk = lock.item("dxvk").and_then(Value::as_object);
+                let files = lock.need_table("files")?;
+                if dxvk.is_none_or(|dxvk| dxvk.is_empty())
+                    || GPU_FILES.iter().any(|name| !files.contains_key(*name))
+                {
+                    return Err(Error::patch(
+                        "GPU displays require the complete matched Wine and DXGI overlay for this Proton build.",
+                    ));
+                }
+                Ok(Self::Gpu)
+            }
+            _ => Err(Error::patch("Unknown display renderer in bundle.json.")),
+        }
+    }
+
+    pub fn select(lock: &Value, requested: Option<Self>) -> Result<Self> {
+        let supported = Self::from_manifest(lock)?;
+        if requested == Some(Self::Gpu) && supported != Self::Gpu {
+            return Err(Error::patch(
+                "This Proton overlay supports CPU displays only. Install a GPU-capable Fenix patch first.",
+            ));
+        }
+        Ok(requested.unwrap_or(supported))
+    }
+
+    /// A manual fallback is a user preference, distinct from the renderer an
+    /// older release happened to configure automatically.
+    pub fn for_state(lock: &Value, state: &Value, requested: Option<Self>) -> Result<Self> {
+        let saved = match state.item("display_renderer_override") {
+            None | Some(Value::Null) => None,
+            Some(value) if value.as_str() == Some("CPU") => Some(Self::Cpu),
+            Some(value) if value.as_str() == Some("GPU") => Some(Self::Gpu),
+            _ => return Err(Error::patch("Unknown saved display renderer preference.")),
+        };
+        Self::select(lock, requested.or(saved))
+    }
+
+    /// States predating renderer metadata always configured the CPU path.
+    pub fn from_state(state: &Value) -> Self {
+        if state.is("display_renderer", "GPU") {
+            Self::Gpu
+        } else {
+            Self::Cpu
+        }
+    }
+}
+
 // Python's `\s` additionally covers the four separator control characters.
 static BUILD_NUMBER: LazyLock<Regex> = LazyLock::new(|| py::pattern(r"\A\d+[\s\x1c-\x1f]+"));
 static FRAMEWORK_SECTION: LazyLock<Regex> = LazyLock::new(|| {
@@ -108,6 +189,13 @@ pub fn read_manifest(root: &Path, variant: Option<&str>) -> Result<Value> {
         .as_object()
         .ok_or_else(|| Error::other("bundle.json: a variant is not a JSON object"))?;
     let mut merged = json::merged(&lock, entry);
+    if !entry.contains_key("dxvk") {
+        merged.remove("dxvk");
+    }
+    // A renderer is a capability of this exact overlay, not of its base.
+    if !entry.contains_key("display_renderer") {
+        merged.remove("display_renderer");
+    }
     merged.insert("variant".to_string(), json!(variant));
     Ok(Value::Object(merged))
 }
@@ -490,7 +578,7 @@ pub fn apply_overlay(
             &data,
             if name.contains("/bin/") { 0o755 } else { 0o644 },
         )?;
-        if name.starts_with("files/lib/wine/x86_64-windows/") {
+        if name.starts_with("files/lib/wine/x86_64-windows/") || name == DXGI_FILE {
             atomic(
                 &contained(
                     prefix,
@@ -1007,7 +1095,7 @@ fn xml_settings(path: &Path, changes: &[(&str, &str)]) -> Result<bool> {
     Ok(true)
 }
 
-pub const NEEDS_SIGN_IN: &str = "Start Fenix once and sign in, then close it and apply settings again. CPU rendering needs its initial settings file.";
+pub const NEEDS_SIGN_IN: &str = "Start Fenix once and sign in, then close it and apply settings again. Display rendering needs its initial settings file.";
 pub const DEFAULT_FOLDER: &str = "Microsoft Flight Simulator 2024";
 
 /// Record what could be written and return the message for the user.
@@ -1015,18 +1103,39 @@ pub fn apply_settings(
     state: &mut Map<String, Value>,
     prefix: &Path,
     folder: &str,
+    renderer: DisplayRenderer,
 ) -> Result<&'static str> {
-    let (configured, readouts) = configure_prefix(prefix, folder)?;
+    let (configured, readouts) = configure_prefix(prefix, folder, renderer)?;
     state.insert("configured".to_string(), json!(configured));
     state.insert("readouts".to_string(), json!(readouts));
+    state.insert(
+        "display_renderer".to_string(),
+        if configured {
+            json!(renderer.as_str())
+        } else {
+            Value::Null
+        },
+    );
+    if !configured {
+        return Ok(NEEDS_SIGN_IN);
+    }
     if readouts {
-        return Ok("CPU displays, Legacy readouts and Fenix autostart configured.");
+        return Ok(match renderer {
+            DisplayRenderer::Cpu => "CPU displays, Legacy readouts and Fenix autostart configured.",
+            DisplayRenderer::Gpu => "GPU displays, Legacy readouts and Fenix autostart configured.",
+        });
     }
     // Reported for a fresh installation: persistancy.xml first appears when the aircraft is loaded.
-    Ok(
-        "CPU displays and Fenix autostart configured. Fenix has not created the file for the FCU readout \
-        setting yet: load the aircraft once in the simulator, close the simulator and apply settings again.",
-    )
+    Ok(match renderer {
+        DisplayRenderer::Cpu => {
+            "CPU displays and Fenix autostart configured. Fenix has not created the file for the FCU readout \
+        setting yet: load the aircraft once in the simulator, close the simulator and apply settings again."
+        }
+        DisplayRenderer::Gpu => {
+            "GPU displays and Fenix autostart configured. Fenix has not created the file for the FCU readout \
+        setting yet: load the aircraft once in the simulator, close the simulator and apply settings again."
+        }
+    })
 }
 
 pub fn readouts_set(state: &Value) -> bool {
@@ -1040,7 +1149,11 @@ pub fn readouts_set(state: &Value) -> bool {
 }
 
 /// Whether the display settings with autostart, and the Legacy readouts, could be written.
-pub fn configure_prefix(prefix: &Path, folder: &str) -> Result<(bool, bool)> {
+pub fn configure_prefix(
+    prefix: &Path,
+    folder: &str,
+    renderer: DisplayRenderer,
+) -> Result<(bool, bool)> {
     if !prefix.join(PROGRAM).join("Fenix.exe").is_file() {
         return Ok((false, false));
     }
@@ -1049,9 +1162,23 @@ pub fn configure_prefix(prefix: &Path, folder: &str) -> Result<(bool, bool)> {
     let ready = xml_settings(
         &settings,
         &[
-            ("displayMode", "CPU"),
-            ("newRender", "false"),
-            ("preferCPU", "true"),
+            ("displayMode", renderer.as_str()),
+            (
+                "newRender",
+                if renderer == DisplayRenderer::Gpu {
+                    "true"
+                } else {
+                    "false"
+                },
+            ),
+            (
+                "preferCPU",
+                if renderer == DisplayRenderer::Gpu {
+                    "false"
+                } else {
+                    "true"
+                },
+            ),
             ("multithread", "true"),
         ],
     )?;
@@ -1236,6 +1363,10 @@ pub fn install(
         None => runner_variant(system, &original_runner, false)?,
     };
     let lock = system.manifest(variant.as_deref())?;
+    let renderer = match &upgrade {
+        Some(previous) => DisplayRenderer::for_state(&lock, previous, None)?,
+        None => DisplayRenderer::from_manifest(&lock)?,
+    };
     for (name, accepted) in &lock.need_table("accepted_scripts")? {
         let mut accepted: Vec<Value> = accepted
             .as_array()
@@ -1310,6 +1441,11 @@ pub fn install(
             state.insert(key.into(), previous.need(key)?.clone());
         }
         state.insert("readouts".into(), json!(readouts_set(previous)));
+        for key in ["display_renderer", "display_renderer_override"] {
+            if let Some(value) = previous.item(key) {
+                state.insert(key.into(), value.clone());
+            }
+        }
         state.insert(
             "proton_before".into(),
             previous
@@ -1370,7 +1506,6 @@ pub fn install(
                     )?;
                     progress("Preparing fonts, graphics dependencies and Fenix settings …")?;
                     system.graphics_and_fonts(&staged, &runner, wine.as_ref())?;
-                    apply_settings(&mut state, &staged, DEFAULT_FOLDER)?;
                 }
                 system.prepare_geometry(
                     wine.as_ref(),
@@ -1385,6 +1520,18 @@ pub fn install(
         // Bootstrap native Framework with the unchanged runner first.
         // Publish the overlay only after every staging Wine process exited.
         apply_overlay(system, &staged, &runner, &bundle, variant.as_deref())?;
+        let renderer_changed = upgrade
+            .as_ref()
+            .is_some_and(|previous| DisplayRenderer::from_state(previous) != renderer);
+        if renderer_changed {
+            let settings_backup = backup.join("settings-before-update");
+            fsx::mkdir(&settings_backup, 0o700)?;
+            backup_settings(&staged, &settings_backup)?;
+            progress("Updating the display renderer for this Proton build …")?;
+        }
+        if upgrade.is_none() || renderer_changed {
+            apply_settings(&mut state, &staged, DEFAULT_FOLDER, renderer)?;
+        }
         system.ensure_idle(&prefix)?;
         state.insert("state".into(), json!("committing"));
         save(&state)?;
@@ -1587,6 +1734,15 @@ pub fn backup_settings(prefix: &Path, backup: &Path) -> Result<()> {
 }
 
 pub fn configure(system: &dyn System, runtime: &OsStr, progress: Progress<'_>) -> Result<()> {
+    configure_with_renderer(system, runtime, progress, None)
+}
+
+pub fn configure_with_renderer(
+    system: &dyn System,
+    runtime: &OsStr,
+    progress: Progress<'_>,
+    requested: Option<DisplayRenderer>,
+) -> Result<()> {
     let held = locked(system, runtime, true, false)?;
     let root = &held.root;
     let state = read_json(&root.join(MARKER))?;
@@ -1594,6 +1750,8 @@ pub fn configure(system: &dyn System, runtime: &OsStr, progress: Progress<'_>) -
         return Err(Error::patch("Finish patch installation first."));
     }
     verify_installed(system, root, &state)?;
+    let lock = system.manifest(state_variant(&state)?.as_deref())?;
+    let renderer = DisplayRenderer::for_state(&lock, &state, requested)?;
     let prefix = root.join("local/msfs-prefix");
     // Preserve settings on every user-triggered reconfiguration.
     let backup =
@@ -1601,7 +1759,10 @@ pub fn configure(system: &dyn System, runtime: &OsStr, progress: Progress<'_>) -
     fsx::mkdir(&backup, 0o700)?;
     backup_settings(&prefix, &backup)?;
     let mut state = json::object(state, "The patch state")?;
-    let message = apply_settings(&mut state, &prefix, DEFAULT_FOLDER)?;
+    let message = apply_settings(&mut state, &prefix, DEFAULT_FOLDER, renderer)?;
+    if let Some(renderer) = requested {
+        state.insert("display_renderer_override".into(), json!(renderer.as_str()));
+    }
     write_json(&root.join(MARKER), &Value::Object(state.clone()))?;
     if state.get("configured") != Some(&Value::Bool(true)) {
         return Err(Error::patch(NEEDS_SIGN_IN));
@@ -1794,6 +1955,18 @@ pub fn state_report(result: &mut Map<String, Value>, state: &Value) {
         json!(state.item("configured") == Some(&Value::Bool(true))),
     );
     result.insert("readouts".into(), json!(readouts_set(state)));
+    result.insert(
+        "display_renderer_override".into(),
+        state.field("display_renderer_override").clone(),
+    );
+    result.insert(
+        "display_renderer".into(),
+        if state.item("configured") == Some(&Value::Bool(true)) {
+            json!(DisplayRenderer::from_state(state).as_str())
+        } else {
+            Value::Null
+        },
+    );
 }
 
 pub fn snapshot(system: &dyn System, runtime: &OsStr) -> Result<Value> {

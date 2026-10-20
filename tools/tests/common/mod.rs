@@ -38,7 +38,7 @@ use x11rb::{
 };
 
 /// The variables that the stand-ins record when they are set.
-const LOGGED: [&str; 7] = [
+const LOGGED: [&str; 9] = [
     "XDG_CACHE_HOME",
     "WINEPREFIX",
     "WINEDLLOVERRIDES",
@@ -46,6 +46,8 @@ const LOGGED: [&str; 7] = [
     "WINE_FENIX_HELPER_WINDOWS",
     "DISPLAY",
     "WAYLAND_DISPLAY",
+    "GIT_CEILING_DIRECTORIES",
+    "SOURCE_DATE_EPOCH",
 ];
 
 /// Every stand-in begins with this: one line per call in `$FAKE_LOG`, with
@@ -56,7 +58,7 @@ const RECORD: &str = r#"#!/bin/sh
     printf '%s' "${0##*/}"
     for argument in "$@"; do printf ' [%s]' "$argument"; done
     printf ' cwd=%s' "$PWD"
-    for name in XDG_CACHE_HOME WINEPREFIX WINEDLLOVERRIDES WINE_TRACK_WRITECOPY WINE_FENIX_HELPER_WINDOWS DISPLAY WAYLAND_DISPLAY; do
+    for name in XDG_CACHE_HOME WINEPREFIX WINEDLLOVERRIDES WINE_TRACK_WRITECOPY WINE_FENIX_HELPER_WINDOWS DISPLAY WAYLAND_DISPLAY GIT_CEILING_DIRECTORIES SOURCE_DATE_EPOCH; do
         eval "value=\${$name-<unset>}"
         printf ' %s=%s' "$name" "$value"
     done
@@ -75,6 +77,17 @@ const MAKE: &str = r#"case "$1" in
             printf 'built %s\n' "$target" > "$target"
         done ;;
 esac
+"#;
+
+const MESON: &str = r#"[ "$1" = setup ] && mkdir -p "$2"
+"#;
+
+const NINJA: &str = r#"build=$2
+shift 3
+for target in "$@"; do
+    mkdir -p "$build/${target%/*}"
+    printf 'built %s\n' "$target" > "$build/$target"
+done
 "#;
 
 const STRIP: &str = r#"printf 'stripped by %s\n' "${0##*/}" >> "$2"
@@ -341,6 +354,8 @@ impl Lab {
         let bin = base.join("bin");
         for (name, part) in [
             ("make", MAKE),
+            ("meson", MESON),
+            ("ninja", NINJA),
             ("autoreconf", ""),
             ("python3", ""),
             ("strip", STRIP),
@@ -370,6 +385,8 @@ impl Lab {
             autoreconf: at("autoreconf"),
             python3: at("python3"),
             make: at("make"),
+            meson: at("meson"),
+            ninja: at("ninja"),
             strip: at("strip"),
             mingw_strip: at("x86_64-w64-mingw32-strip"),
             mingw_gcc: at("x86_64-w64-mingw32-gcc"),

@@ -1,11 +1,12 @@
 # Rebuild and publish
 
-The binary ZIP includes complete, unchanged upstream source archives in
+The binary ZIP includes complete original upstream source archives in
 `sources/`, their pinned checksums in `bundle.json`, and all modifications in
 `patches/`. Patches apply in manifest order. Retain upstream per-file notices.
 
 The initial build used x86_64 Arch Linux, GCC/MinGW-w64, autoconf, GNU make,
-Python 3 and Perl for Wine's own build steps, and Rust 1.98 for this project's
+Python 3 and Perl for Wine's own build steps, Meson 1.0 or newer, Ninja and
+glslang for DXVK, and Rust 1.98 for this project's
 installer and maintainer tool. Install Wine's normal development dependencies, including
 FreeType, fontconfig, X11, ALSA/PulseAudio, Vulkan headers and MinGW-w64.
 The shipped ELF modules require glibc 2.38 or newer. An older-distribution build
@@ -37,12 +38,12 @@ only copies them. `tests/test_display_refresh.py` checks the first of them and
 needs that launcher's interpreter. Nothing else in this project is Python.
 
 Use a fresh `--build-dir`; existing build trees are never overwritten. `--prepare-only` verifies and applies all patches
-without compiling. The build verifies both source archives, populates the
+without compiling. The build verifies the Wine and xgameruntime source archives, populates the
 xgameruntime submodule, generates spec/Vulkan headers from the included XML,
 and configures Wine with `--enable-win64 --disable-tests --enable-silent-rules
 --without-ffmpeg --without-unwind`. Without the last option `configure` links
 `ntdll.so` against the build host's libunwind, which the pinned runners and the
-Steam Linux Runtime containers do not have. It builds the eleven targets listed in `tools/src/build.rs` and
+Steam Linux Runtime containers do not have. It builds the eleven original targets listed in `tools/src/build.rs` and
 the independent MIT window guard, geometry setup and MCDU refresh helpers. Debug sections are stripped from release files.
 Compiler prefix maps replace local checkout paths in both Unix and Windows
 modules with `/usr/src/fenix-a320-linux-patch`.
@@ -53,6 +54,37 @@ regenerate them with a bumped protocol. Existing 32-bit runner clients must
 remain compatible. Rebuild hashes can differ with compiler/platform/timestamps;
 `--record-build` explicitly records a new binary set for review. Rebuild and
 repin the Flightdeck manifest/release together after validating a changed build.
+
+An overlay with a `dxvk` block also builds `gdi32.dll`, `win32u.dll` and
+`wow64win.dll`, and the already included `win32u.so` and wineserver carry the
+shared-resource owner-adapter changes. `make_specfiles` generates the matching
+win32u syscall table from the patched spec file; that generated file is absent
+from the original source archive. The corresponding DXVK revision must
+match the pinned runner's original `d3d11.dll`; rebuilding a different DXVK
+revision can break its private DXGI interface. Only `dxgi.dll` is replaced.
+
+The `dxvk` block records `revision`, `source`, `source_root`, recursive
+`submodules` (path to commit), and ordered `patches`. Its archive checksum belongs
+in the overlay's `sources` table. The included
+`sources/dxvk-6227b633e8d5289.tar.gz` contains the original committed DXVK
+`6227b633e8d528952873c4c146773663964fcb31` tree and all six pinned submodules;
+the pinned Proton Experimental uses `sources/dxvk-25ca63f17f34bdc.tar.gz` at
+`25ca63f17f34bdc05a39873ee63907d3cbbfa030`, and CachyOS Wine 11 uses
+`sources/dxvk-685301564ea3486.tar.gz` at
+`685301564ea3486a7098bd37194020da84299617`, each with its own recursive pins.
+The modifications are a separate patch. A codeload tarball alone has empty
+submodule directories and cannot replace this complete archive. The build
+checks the archive digest, every recursive submodule declaration and populated
+directory, and each DXVK patch digest before compiling. Extract the complete
+archive from the matching release if it is absent from a source checkout.
+
+Meson uses the included `build-win64.txt` cross file, release optimization,
+`--wrap-mode=nodownload`, the included libdisplay-info, and disables D3D8/9/10/11
+targets. Ninja builds only `src/dxgi/dxgi.dll`. Prefix maps and
+`--no-insert-timestamp` and `SOURCE_DATE_EPOCH=0` for DXGI compilation and
+stripping avoid local paths and changing PE timestamps in that output. Put the selected Meson installation on `PATH`; no global installation
+is required. The source archive retains upstream licence texts, including
+DXVK's zlib/libpng licence and its subprojects' MIT notices.
 
 ## Proton overlays
 
@@ -88,7 +120,9 @@ the Wine 11 changes of `experimental-11` with the Direct2D changes of
 These ports regenerate their own Wine protocol headers (931, 865 and 933 respectively)
 and keep the existing 32-bit clients. They do not import Xodus's mapped-image
 protocol extension: Flightdeck provides the portable Store loader. The selected
-runner's graphics DLLs are not part of the overlay. CachyOS retains its existing
+runner's graphics DLLs are preserved except the same-revision DXGI in overlays
+with their own `dxvk` block. An overlay without that block keeps the original
+eleven Wine targets and does not inherit the base overlay's DXVK build. CachyOS retains its existing
 arc/group rendering; exact path streaming avoids its rotated-arc simplification
 error when computing metrics. Its remote-thread activation-context fix belongs
 in ntdll, while Experimental's implementation is in kernelbase.
@@ -103,6 +137,13 @@ Xvfb), and download pinned Microsoft geometry dependencies. They compare route
 metrics and rasterized stroke contours with an independent geometry reference,
 check actual X11 mapping as well as Win32 visibility, and run the existing
 loader, cursor, write-copy, IOCP and audio regressions.
+An overlay with its own `dxvk` block also tests the native DXGI/D3D11 and
+VKD3D-Proton libraries: shared-resource ownership on every enumerated adapter,
+1,000 cross-process texture frames with pixel verification and GPU fence
+acknowledgements, and exact shared-fence values. The Proton 11 overlays also
+exercise rewinds, nonzero/extreme initial values and creator lifetime. The
+original Xodus physical fence backend retains its pre-existing inability to
+rewind a local fence; the sharing checks there use increasing values.
 
 ## Release files
 

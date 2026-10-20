@@ -4,7 +4,10 @@
 use crate::{
     Context,
     archive::extract,
-    build::{TARGETS, apply_patch, compile, fetch, install_module, read_lock, value, write_lock},
+    build::{
+        DXGI_FILE, apply_patch, compile, compile_dxvk, dxvk_source_name, fetch, install_dxgi,
+        install_module, prepare_dxvk, read_lock, targets, value, write_lock,
+    },
 };
 use fenix_patch::{
     Error, Result, argv, fsx,
@@ -39,10 +42,18 @@ pub fn run(ctx: &Context<'_>, options: &Options) -> Result<()> {
     }
     let source = build.join("wine");
     let sources = entry.need_table("sources")?;
-    let (name, expected) = sources
+    let dxvk_name = dxvk_source_name(&entry)?;
+    let mut wine_sources = sources
         .iter()
+        .filter(|(name, _)| Some(name.as_str()) != dxvk_name);
+    let (name, expected) = wine_sources
         .next()
         .ok_or_else(|| Error::other("bundle.json: the variant names no source archive"))?;
+    if wine_sources.next().is_some() {
+        return Err(value(
+            "bundle.json: the variant names multiple Wine source archives",
+        ));
+    }
     let archive = root.join("sources").join(name);
     if !fsx::exists(&archive) {
         fsx::mkdir_parents(fsx::parent(&archive), 0o777)?;
@@ -77,16 +88,20 @@ pub fn run(ctx: &Context<'_>, options: &Options) -> Result<()> {
     if !expected {
         return Err(value("Unexpected Wine server protocol"));
     }
+    let dxvk = prepare_dxvk(ctx, &entry, &build, &env)?;
     if options.prepare_only {
         return Ok(());
     }
     let output = build.join("objects");
-    let mut flags = OsString::from("-O2 -ffile-prefix-map=");
-    flags.push(&build);
-    flags.push("=/usr/src/fenix-proton");
-    compile(ctx, &source, &output, &flags, options.jobs, &env)?;
+    let mut prefix_maps = OsString::from("-ffile-prefix-map=");
+    prefix_maps.push(&build);
+    prefix_maps.push("=/usr/src/fenix-proton");
+    let mut flags = OsString::from("-O2 ");
+    flags.push(&prefix_maps);
+    let targets = targets(&entry);
+    compile(ctx, &source, &output, &flags, options.jobs, &env, &targets)?;
     let mut hashes = Map::new();
-    for (target, relative) in TARGETS {
+    for (target, relative) in targets {
         let destination = root
             .join("payload/variants")
             .join(&options.variant)
@@ -94,6 +109,18 @@ pub fn run(ctx: &Context<'_>, options: &Options) -> Result<()> {
         install_module(ctx, &output.join(target), &destination, &source, &env)?;
         hashes.insert(
             relative.to_string(),
+            Value::String(fsx::digest(&destination)?),
+        );
+    }
+    if let Some(dxvk) = dxvk {
+        let built = compile_dxvk(ctx, &dxvk, &build, &prefix_maps, options.jobs, &env)?;
+        let destination = root
+            .join("payload/variants")
+            .join(&options.variant)
+            .join(DXGI_FILE);
+        install_dxgi(ctx, &built, &destination, &dxvk, &env)?;
+        hashes.insert(
+            DXGI_FILE.to_string(),
             Value::String(fsx::digest(&destination)?),
         );
     }

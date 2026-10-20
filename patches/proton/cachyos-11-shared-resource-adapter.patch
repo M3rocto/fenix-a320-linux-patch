@@ -1,0 +1,380 @@
+--- a/dlls/gdi32/gdi32.spec
++++ b/dlls/gdi32/gdi32.spec
+@@ -137,6 +137,7 @@
+ @ stdcall D3DKMTOpenSyncObjectNtHandleFromName(ptr) win32u.NtGdiDdDDIOpenSyncObjectNtHandleFromName
+ @ stdcall D3DKMTOpenSynchronizationObject(ptr) win32u.NtGdiDdDDIOpenSynchronizationObject
+ @ stdcall D3DKMTQueryAdapterInfo(ptr) win32u.NtGdiDdDDIQueryAdapterInfo
++@ stdcall D3DKMTGetSharedResourceAdapterLuid(ptr) win32u.NtGdiDdDDIGetSharedResourceAdapterLuid
+ @ stdcall D3DKMTQueryResourceInfo(ptr) win32u.NtGdiDdDDIQueryResourceInfo
+ @ stdcall D3DKMTQueryResourceInfoFromNtHandle(ptr) win32u.NtGdiDdDDIQueryResourceInfoFromNtHandle
+ @ stdcall D3DKMTQueryStatistics(ptr) win32u.NtGdiDdDDIQueryStatistics
+--- a/dlls/win32u/d3dkmt.c
++++ b/dlls/win32u/d3dkmt.c
+@@ -168,11 +168,13 @@
+ {
+     struct d3dkmt_object obj;
+     struct vulkan_physical_device *physical_device;
++    LUID adapter_luid;
+ };
+ 
+ struct d3dkmt_device
+ {
+     struct d3dkmt_object obj;
++    LUID adapter_luid;
+ };
+ 
+ struct d3dkmt_vidpn_source
+@@ -296,7 +298,7 @@
+ 
+ /* create a global D3DKMT object, either with a global handle or later shareable */
+ static NTSTATUS d3dkmt_object_create( struct d3dkmt_object *object, int fd, UINT value, BOOL shared,
+-                                      const void *runtime, UINT runtime_size )
++                                      const void *runtime, UINT runtime_size, const LUID *adapter_luid )
+ {
+     NTSTATUS status;
+ 
+@@ -307,6 +309,11 @@
+         req->type = object->type;
+         req->fd = fd;
+         req->value = value;
++        if (adapter_luid)
++        {
++            req->value = D3DKMT_RESOURCE_CREATE_ADAPTER_LUID;
++            wine_server_add_data( req, adapter_luid, sizeof(*adapter_luid) );
++        }
+         if (runtime_size) wine_server_add_data( req, runtime, runtime_size );
+         status = wine_server_call( req );
+         object->handle = wine_server_ptr_handle( reply->handle );
+@@ -626,6 +633,7 @@
+     else adapter->physical_device = get_vulkan_physical_device( instance, &desc->AdapterLuid );
+     if (!adapter->physical_device) WARN( "Failed to find Vulkan physical device\n" );
+ 
++    adapter->adapter_luid = desc->AdapterLuid;
+     desc->hAdapter = adapter->obj.local;
+     return STATUS_SUCCESS;
+ 
+@@ -652,6 +660,7 @@
+     if ((status = d3dkmt_object_alloc( sizeof(*device), D3DKMT_DEVICE, (void **)&device ))) return status;
+     if ((status = alloc_object_handle( &device->obj ))) goto failed;
+ 
++    device->adapter_luid = adapter->adapter_luid;
+     desc->hDevice = device->obj.local;
+     return STATUS_SUCCESS;
+ 
+@@ -1318,7 +1327,7 @@
+ 
+         if (!params->Flags.CreateShared) status = alloc_object_handle( &resource->obj );
+         else status = d3dkmt_object_create( &resource->obj, -1, 0, params->Flags.NtSecuritySharing,
+-                                            params->pPrivateRuntimeData, params->PrivateRuntimeDataSize );
++                                            params->pPrivateRuntimeData, params->PrivateRuntimeDataSize, &device->adapter_luid );
+         if (status) goto failed;
+ 
+         params->hGlobalShare = resource->obj.shared ? 0 : resource->obj.global;
+@@ -1581,6 +1590,34 @@
+ 
+ 
+ /******************************************************************************
++ *           NtGdiDdDDIGetSharedResourceAdapterLuid    (win32u.@)
++ */
++NTSTATUS WINAPI NtGdiDdDDIGetSharedResourceAdapterLuid( D3DKMT_GETSHAREDRESOURCEADAPTERLUID *params )
++{
++    LUID luid = {0};
++    NTSTATUS status;
++
++    if (!params || (!params->hGlobalShare == !params->hNtHandle)) return STATUS_INVALID_PARAMETER;
++    if (params->hGlobalShare && !is_d3dkmt_global( params->hGlobalShare )) return STATUS_INVALID_PARAMETER;
++
++    SERVER_START_REQ( d3dkmt_object_query )
++    {
++        req->type = D3DKMT_RESOURCE;
++        req->global = params->hGlobalShare;
++        req->handle = wine_server_obj_handle( params->hNtHandle );
++        wine_server_set_reply( req, &luid, sizeof(luid) );
++        status = wine_server_call( req );
++        /* Old servers and resources created without owner metadata must not
++         * accidentally identify the first adapter on a multi-GPU system. */
++        if (!status && wine_server_reply_size( reply ) != sizeof(luid)) status = STATUS_NOT_SUPPORTED;
++    }
++    SERVER_END_REQ;
++
++    if (!status) params->AdapterLuid = luid;
++    return status;
++}
++
++/******************************************************************************
+  *           NtGdiDdDDIQueryResourceInfo    (win32u.@)
+  */
+ NTSTATUS WINAPI NtGdiDdDDIQueryResourceInfo( D3DKMT_QUERYRESOURCEINFO *params )
+@@ -1638,7 +1675,7 @@
+ 
+     if ((status = d3dkmt_object_alloc( sizeof(*mutex), D3DKMT_MUTEX, (void **)&mutex ))) return status;
+     if ((status = d3dkmt_object_create( &mutex->obj, -1, params->InitialValue, params->Flags.NtSecuritySharing,
+-                                        params->pPrivateRuntimeData, params->PrivateRuntimeDataSize )))
++                                        params->pPrivateRuntimeData, params->PrivateRuntimeDataSize, NULL )))
+         goto failed;
+ 
+     params->hSharedHandle = mutex->obj.shared ? 0 : mutex->obj.global;
+@@ -1915,7 +1952,7 @@
+ 
+     if ((status = d3dkmt_object_alloc( sizeof(*sync), D3DKMT_SYNC, (void **)&sync ))) return status;
+     if (!params->Info.Flags.Shared) status = alloc_object_handle( sync );
+-    else status = d3dkmt_object_create( sync, -1, 0, params->Info.Flags.NtSecuritySharing, NULL, 0 );
++    else status = d3dkmt_object_create( sync, -1, 0, params->Info.Flags.NtSecuritySharing, NULL, 0, NULL );
+     if (status) goto failed;
+ 
+     if (params->Info.Flags.Shared) params->Info.SharedHandle = sync->shared ? 0 : sync->global;
+@@ -2116,7 +2153,7 @@
+ }
+ 
+ /* create a D3DKMT global or shared resource from a host-specific fd */
+-D3DKMT_HANDLE d3dkmt_create_resource( int fd, D3DKMT_HANDLE *global )
++D3DKMT_HANDLE d3dkmt_create_resource( int fd, D3DKMT_HANDLE *global, const LUID *adapter_luid )
+ {
+     struct d3dkmt_resource *resource = NULL;
+     struct d3dkmt_object *allocation = NULL;
+@@ -2126,7 +2163,7 @@
+ 
+     if ((status = d3dkmt_object_alloc( sizeof(*resource), D3DKMT_RESOURCE, (void **)&resource ))) goto failed;
+     if ((status = d3dkmt_object_alloc( sizeof(*allocation), D3DKMT_ALLOCATION, (void **)&allocation ))) goto failed;
+-    if ((status = d3dkmt_object_create( &resource->obj, fd, 0, !global, NULL, 0 ))) goto failed;
++    if ((status = d3dkmt_object_create( &resource->obj, fd, 0, !global, NULL, 0, adapter_luid ))) goto failed;
+ 
+     if ((status = alloc_object_handle( allocation ))) goto failed;
+     resource->allocation = allocation->local;
+@@ -2218,7 +2255,7 @@
+     TRACE( "global %p\n", global );
+ 
+     if ((status = d3dkmt_object_alloc( sizeof(*sync), D3DKMT_SYNC, (void **)&sync ))) goto failed;
+-    if ((status = d3dkmt_object_create( sync, fd, 0, !global, runtime, runtime_size ))) goto failed;
++    if ((status = d3dkmt_object_create( sync, fd, 0, !global, runtime, runtime_size, NULL ))) goto failed;
+     if (global) *global = sync->global;
+     return sync->local;
+ 
+--- a/dlls/win32u/vulkan.c
++++ b/dlls/win32u/vulkan.c
+@@ -1735,6 +1735,10 @@
+         if (!memory->local)
+         {
+             VkMemoryGetFdInfoKHR get_fd_info = {.sType = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR, .memory = host_device_memory};
++            VkPhysicalDeviceIDProperties id = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES};
++            VkPhysicalDeviceProperties2 properties = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &id};
++            UINT32 node_mask;
++            LUID luid = {0};
+             int fd = -1;
+ 
+             switch ((get_fd_info.handleType = get_host_external_memory_type()))
+@@ -1748,7 +1752,10 @@
+                 break;
+             }
+ 
+-            memory->local = d3dkmt_create_resource( fd, nt_shared ? NULL : &memory->global );
++            instance->p_vkGetPhysicalDeviceProperties2KHR( physical_device->host.physical_device, &properties );
++            if (!get_gpu_info_from_uuid( (const GUID *)id.deviceUUID, &luid, &node_mask, NULL ))
++                WARN( "Could not identify shared memory owner %s\n", debugstr_guid((const GUID *)id.deviceUUID) );
++            memory->local = d3dkmt_create_resource( fd, nt_shared ? NULL : &memory->global, &luid );
+             close( fd );
+ 
+             if (!memory->local) goto failed;
+--- a/dlls/win32u/win32u.spec
++++ b/dlls/win32u/win32u.spec
+@@ -281,7 +281,7 @@
+ @ stub -syscall NtGdiDdDDIGetScanLine
+ @ stub -syscall NtGdiDdDDIGetSetSwapChainMetadata
+ @ stub -syscall NtGdiDdDDIGetSharedPrimaryHandle
+-@ stub -syscall NtGdiDdDDIGetSharedResourceAdapterLuid
++@ stdcall -syscall NtGdiDdDDIGetSharedResourceAdapterLuid(ptr)
+ @ stub -syscall NtGdiDdDDIGetSharedResourceAdapterLuidFlipManager
+ @ stub -syscall NtGdiDdDDIGetSwapChainSurfacePhysicalAddress
+ @ stub -syscall NtGdiDdDDIGetYieldPercentage
+--- a/dlls/win32u/win32u_private.h
++++ b/dlls/win32u/win32u_private.h
+@@ -227,7 +227,7 @@
+ extern HANDLE open_shared_resource_from_name( const WCHAR *name );
+ extern HANDLE open_shared_semaphore_from_name( const WCHAR *name );
+ 
+-extern D3DKMT_HANDLE d3dkmt_create_resource( int fd, D3DKMT_HANDLE *global );
++extern D3DKMT_HANDLE d3dkmt_create_resource( int fd, D3DKMT_HANDLE *global, const LUID *adapter_luid );
+ extern D3DKMT_HANDLE d3dkmt_open_resource( D3DKMT_HANDLE global, HANDLE shared, D3DKMT_HANDLE *mutex_local, D3DKMT_HANDLE *sync_local );
+ extern NTSTATUS d3dkmt_destroy_resource( D3DKMT_HANDLE local );
+ 
+--- a/dlls/wow64win/gdi.c
++++ b/dlls/wow64win/gdi.c
+@@ -1377,6 +1377,25 @@
+     return NtGdiDdDDIQueryAdapterInfo( &desc );
+ }
+ 
++NTSTATUS WINAPI wow64_NtGdiDdDDIGetSharedResourceAdapterLuid( UINT *args )
++{
++    struct
++    {
++        D3DKMT_HANDLE hGlobalShare;
++        ULONG hNtHandle;
++        LUID AdapterLuid;
++    } *desc32 = get_ptr( &args );
++    D3DKMT_GETSHAREDRESOURCEADAPTERLUID desc;
++    NTSTATUS status;
++
++    if (!desc32) return STATUS_INVALID_PARAMETER;
++    desc.hGlobalShare = desc32->hGlobalShare;
++    desc.hNtHandle = UlongToHandle( desc32->hNtHandle );
++    status = NtGdiDdDDIGetSharedResourceAdapterLuid( &desc );
++    if (!status) desc32->AdapterLuid = desc.AdapterLuid;
++    return status;
++}
++
+ NTSTATUS WINAPI wow64_NtGdiDdDDIQueryResourceInfo( UINT *args )
+ {
+     struct
+--- a/include/ddk/d3dkmthk.h
++++ b/include/ddk/d3dkmthk.h
+@@ -1261,6 +1261,14 @@
+ NTSTATUS WINAPI D3DKMTOpenSyncObjectFromNtHandle2( D3DKMT_OPENSYNCOBJECTFROMNTHANDLE2 *params );
+ NTSTATUS WINAPI D3DKMTOpenSyncObjectNtHandleFromName( D3DKMT_OPENSYNCOBJECTNTHANDLEFROMNAME *params );
+ NTSTATUS WINAPI D3DKMTQueryAdapterInfo(D3DKMT_QUERYADAPTERINFO *desc);
++typedef struct _D3DKMT_GETSHAREDRESOURCEADAPTERLUID
++{
++    D3DKMT_HANDLE hGlobalShare;
++    HANDLE hNtHandle;
++    LUID AdapterLuid;
++} D3DKMT_GETSHAREDRESOURCEADAPTERLUID;
++
++NTSTATUS WINAPI D3DKMTGetSharedResourceAdapterLuid( D3DKMT_GETSHAREDRESOURCEADAPTERLUID *params );
+ NTSTATUS WINAPI D3DKMTQueryResourceInfo( D3DKMT_QUERYRESOURCEINFO *params );
+ NTSTATUS WINAPI D3DKMTQueryResourceInfoFromNtHandle( D3DKMT_QUERYRESOURCEINFOFROMNTHANDLE *params );
+ NTSTATUS WINAPI D3DKMTQueryStatistics(D3DKMT_QUERYSTATISTICS *stats);
+--- a/include/ntgdi.h
++++ b/include/ntgdi.h
+@@ -554,6 +554,7 @@
+ W32KAPI NTSTATUS WINAPI NtGdiDdDDIOpenSyncObjectFromNtHandle2( D3DKMT_OPENSYNCOBJECTFROMNTHANDLE2 *params );
+ W32KAPI NTSTATUS WINAPI NtGdiDdDDIOpenSyncObjectNtHandleFromName( D3DKMT_OPENSYNCOBJECTNTHANDLEFROMNAME *params );
+ W32KAPI NTSTATUS WINAPI NtGdiDdDDIQueryAdapterInfo( D3DKMT_QUERYADAPTERINFO *desc );
++W32KAPI NTSTATUS WINAPI NtGdiDdDDIGetSharedResourceAdapterLuid( D3DKMT_GETSHAREDRESOURCEADAPTERLUID *params );
+ W32KAPI NTSTATUS WINAPI NtGdiDdDDIQueryResourceInfo( D3DKMT_QUERYRESOURCEINFO *params );
+ W32KAPI NTSTATUS WINAPI NtGdiDdDDIQueryResourceInfoFromNtHandle( D3DKMT_QUERYRESOURCEINFOFROMNTHANDLE *params );
+ W32KAPI NTSTATUS WINAPI NtGdiDdDDIQueryStatistics( D3DKMT_QUERYSTATISTICS *stats );
+--- a/include/wine/server_protocol.h
++++ b/include/wine/server_protocol.h
+@@ -958,6 +958,8 @@
+     } ipv6;
+ };
+ 
++#define D3DKMT_RESOURCE_CREATE_ADAPTER_LUID 1
++
+ enum d3dkmt_type
+ {
+     D3DKMT_ADAPTER      = 1,
+@@ -6168,6 +6170,7 @@
+ {
+     struct reply_header __header;
+     data_size_t         runtime_size;
++    /* VARARG(adapter_luid,bytes); */
+     char __pad_12[4];
+ };
+ 
+--- a/server/d3dkmt.c
++++ b/server/d3dkmt.c
+@@ -43,6 +43,7 @@
+     void               *runtime;        /* client runtime data */
+     data_size_t         runtime_size;   /* size of client runtime data */
+     struct fd          *fd;             /* fd object for unix fds */
++    LUID                adapter_luid;   /* creating adapter, independent of runtime metadata */
+ };
+ 
+ static void d3dkmt_object_dump( struct object *obj, int verbose );
+@@ -406,6 +407,7 @@
+     object->global          = 0;
+     object->runtime_size    = runtime_size;
+     object->fd              = NULL;
++    memset( &object->adapter_luid, 0, sizeof(object->adapter_luid) );
+ 
+     if (!(object->runtime = memdup( runtime, runtime_size )) ||
+         !(object->global = alloc_object_handle( object )))
+@@ -588,8 +590,25 @@
+ /* create a global d3dkmt object */
+ DECL_HANDLER(d3dkmt_object_create)
+ {
++    data_size_t runtime_size = get_req_data_size();
++    const void *runtime = get_req_data();
++    LUID adapter_luid = {0};
+     struct d3dkmt_object *object;
+     struct fd *fd = NULL;
++
++    /* The optional prefix extends only the variable payload. Old clients and
++     * all request/reply layouts remain compatible with server protocol 931. */
++    if (req->type == D3DKMT_RESOURCE && req->value == D3DKMT_RESOURCE_CREATE_ADAPTER_LUID)
++    {
++        if (runtime_size < sizeof(adapter_luid))
++        {
++            set_error( STATUS_INVALID_PARAMETER );
++            return;
++        }
++        memcpy( &adapter_luid, runtime, sizeof(adapter_luid) );
++        runtime = (const char *)runtime + sizeof(adapter_luid);
++        runtime_size -= sizeof(adapter_luid);
++    }
+ 
+     if (req->fd >= 0)
+     {
+@@ -604,7 +623,8 @@
+         if (!(object = d3dkmt_mutex_create( req->value, get_req_data_size(), get_req_data() ))) goto done;
+         break;
+     default:
+-        if (!(object = d3dkmt_object_create( req->type, get_req_data_size(), get_req_data() ))) goto done;
++        if (!(object = d3dkmt_object_create( req->type, runtime_size, runtime ))) goto done;
++        object->adapter_luid = adapter_luid;
+         break;
+     }
+ 
+@@ -653,6 +673,14 @@
+     if (!object) return;
+ 
+     reply->runtime_size = object->runtime_size;
++    if (get_reply_max_size())
++    {
++        if (req->type != D3DKMT_RESOURCE || get_reply_max_size() != sizeof(object->adapter_luid))
++            set_error( STATUS_INVALID_PARAMETER );
++        else if (!object->adapter_luid.LowPart && !object->adapter_luid.HighPart)
++            set_error( STATUS_NOT_SUPPORTED );
++        else set_reply_data( &object->adapter_luid, sizeof(object->adapter_luid) );
++    }
+     release_object( object );
+ }
+ 
+--- a/server/protocol.def
++++ b/server/protocol.def
+@@ -974,6 +974,8 @@
+     } ipv6;
+ };
+ 
++#define D3DKMT_RESOURCE_CREATE_ADAPTER_LUID 1
++
+ enum d3dkmt_type
+ {
+     D3DKMT_ADAPTER      = 1,
+@@ -4265,7 +4267,7 @@
+ @REQ(d3dkmt_object_create)
+     unsigned int        type;           /* d3dkmt object type */
+     int                 fd;             /* host specific fd */
+-    unsigned int        value;          /* initial value for keyed mutex */
++    unsigned int        value;          /* initial mutex key or resource creation flags */
+     VARARG(runtime,bytes);              /* client runtime data */
+ @REPLY
+     d3dkmt_handle_t     global;         /* global d3dkmt handle */
+@@ -4288,6 +4290,7 @@
+     obj_handle_t        handle;         /* shared object handle */
+ @REPLY
+     data_size_t         runtime_size;   /* size of client runtime data */
++    VARARG(adapter_luid,bytes);          /* optional resource owner LUID */
+ @END
+ 
+ 
+--- a/server/request_trace.h
++++ b/server/request_trace.h
+@@ -3508,6 +3508,7 @@
+ static void dump_d3dkmt_object_query_reply( const struct d3dkmt_object_query_reply *req )
+ {
+     fprintf( stderr, " runtime_size=%u", req->runtime_size );
++    dump_varargs_bytes( ", adapter_luid=", cur_size );
+ }
+ 
+ static void dump_d3dkmt_object_open_request( const struct d3dkmt_object_open_request *req )

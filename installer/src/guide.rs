@@ -165,7 +165,7 @@ pub fn overview(target: &dyn Target) -> Result<Value> {
         steps[0].insert(
             "text".into(),
             json!(format!(
-                "Patch {} is installed; this installer brings {}. Fenix, your sign-in and its settings are kept. Close the simulator and Fenix first.",
+                "Patch {} is installed; this installer brings {}. Fenix and your sign-in are kept; display settings are updated for this Proton build. Close the simulator and Fenix first.",
                 json::text(get(&status, "installed_version")),
                 json::text(get(&status, "version"))
             )),
@@ -223,7 +223,7 @@ pub fn overview(target: &dyn Target) -> Result<Value> {
         "configure",
         "Apply the display settings",
         configured,
-        "Sets CPU rendering and Legacy FCU readouts, the configuration the cockpit displays were verified with, \
+        "Selects the display renderer supported by this Proton build, enables Legacy FCU readouts \
          and starts Fenix together with the simulator."
             .to_string(),
         "Apply settings",
@@ -235,7 +235,7 @@ pub fn overview(target: &dyn Target) -> Result<Value> {
             false,
             format!(
                 "Fenix has not created the file for this setting yet. Start {simulator} {launch}, load the Fenix A320 once and \
-                 close the simulator. Then apply the setting; CPU rendering and autostart are already in place."
+                 close the simulator. Then apply the setting; display rendering and autostart are already in place."
             ),
             "Apply setting",
         ));

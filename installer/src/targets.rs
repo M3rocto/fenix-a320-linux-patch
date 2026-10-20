@@ -23,6 +23,18 @@ pub trait Target: Send + Sync {
     fn install(&self, bundle: &OsStr, progress: Progress<'_>, proton: Option<&OsStr>)
     -> Result<()>;
     fn configure(&self, progress: Progress<'_>) -> Result<()>;
+    fn configure_with_renderer(
+        &self,
+        progress: Progress<'_>,
+        renderer: Option<core::DisplayRenderer>,
+    ) -> Result<()> {
+        if renderer.is_some() {
+            return Err(Error::patch(
+                "This target cannot select a display renderer.",
+            ));
+        }
+        self.configure(progress)
+    }
     fn restore(&self, progress: Progress<'_>) -> Result<()>;
     fn app(&self, progress: Progress<'_>, executable: Option<&OsStr>, manager: bool) -> Result<()>;
 
@@ -80,6 +92,14 @@ impl Target for Flightdeck {
 
     fn configure(&self, progress: Progress<'_>) -> Result<()> {
         core::configure(self.system.as_ref(), &self.runtime, progress)
+    }
+
+    fn configure_with_renderer(
+        &self,
+        progress: Progress<'_>,
+        renderer: Option<core::DisplayRenderer>,
+    ) -> Result<()> {
+        core::configure_with_renderer(self.system.as_ref(), &self.runtime, progress, renderer)
     }
 
     fn restore(&self, progress: Progress<'_>) -> Result<()> {
@@ -145,6 +165,14 @@ impl Target for Steam {
 
     fn configure(&self, progress: Progress<'_>) -> Result<()> {
         steam::configure(self.system.as_ref(), &self.item, progress)
+    }
+
+    fn configure_with_renderer(
+        &self,
+        progress: Progress<'_>,
+        renderer: Option<core::DisplayRenderer>,
+    ) -> Result<()> {
+        steam::configure_with_renderer(self.system.as_ref(), &self.item, progress, renderer)
     }
 
     fn restore(&self, progress: Progress<'_>) -> Result<()> {

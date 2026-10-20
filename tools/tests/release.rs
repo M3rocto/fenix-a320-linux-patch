@@ -295,6 +295,43 @@ fn mode_of(path: &Path) -> u32 {
 }
 
 #[test]
+fn dxvk_sources_and_modified_source_pins_are_part_of_both_releases() {
+    for variant in [false, true] {
+        let fixture = Fixture::new();
+        let root = &fixture.tree.root;
+        put(
+            &root.join("sources/dxvk-source.tar.gz"),
+            "unchanged DXVK plus pinned submodules\n",
+        );
+        put(&root.join("patches/dxvk.patch"), "altered DXVK sources\n");
+        fixture.tree.edit(|lock| {
+            let entry = if variant {
+                &mut lock["variants"][VARIANT]
+            } else {
+                lock
+            };
+            entry["sources"]["dxvk-source.tar.gz"] =
+                digest(&root.join("sources/dxvk-source.tar.gz")).into();
+            entry["dxvk"] = fenix_patch::json::json!({
+                "patches": { "dxvk.patch": digest(&root.join("patches/dxvk.patch")) },
+            });
+        });
+        let outcome = fixture.release("gpu-dist");
+        assert_eq!(outcome.code, 0, "{}", outcome.output);
+        let output = fixture.lab.base.join("gpu-dist");
+        let source = tar_members(&output.join(format!("{}-source.tar.gz", stem())));
+        let binary = zip_members(&output.join(format!("{}-linux-x86_64.zip", stem())));
+        for name in ["sources/dxvk-source.tar.gz", "patches/dxvk.patch"] {
+            let name = format!("{}/{name}", stem());
+            assert!(source.iter().any(|member| member.name == name), "{name}");
+            assert!(binary.iter().any(|member| member.name == name), "{name}");
+        }
+        put(&root.join("patches/dxvk.patch"), "unrecorded change\n");
+        fixture.refused("DXVK patch checksum mismatch: dxvk.patch");
+    }
+}
+
+#[test]
 fn both_archives_hold_the_allowlisted_files_in_a_fixed_form() {
     let fixture = Fixture::new();
     let root = &fixture.tree.root;
