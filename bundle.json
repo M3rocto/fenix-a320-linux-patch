@@ -60,7 +60,8 @@
     "wine-d2d1-path-metrics.patch": "fe107675857195f4936bdd24eff3a59d341adf69924adde934eec6564867f985",
     "wine-d2d1-stroke-contours.patch": "2b37412e2ed71767bdbbf570d0d3acf9351474fe31056c512284e92c58a29402",
     "wine-fenix-helper-windows.patch": "68f6e016af42cdaa54a9ac6cc5f390f3c5dab7a32d4e0196384a11f57bb98cc8",
-    "wine-shared-resource-adapter.patch": "16917cf762b5aaec6d621ab6bff83868d549a37227274ff8fdefa360d17c3ca2"
+    "wine-shared-resource-adapter.patch": "16917cf762b5aaec6d621ab6bff83868d549a37227274ff8fdefa360d17c3ca2",
+    "wine-d2d1-free-vertex-types.patch": "69854caf8cac3a01e49d0d7ee92a46213bc169423821223e6b7fbf4f9aa3a184"
   },
   "sources": {
     "wine-source.tar.gz": "975df721180fc5f53bfefe47cb34ed251083fef9d3c639af849c7c1f1eec3758",
@@ -351,7 +352,8 @@
       "patches": {
         "proton/experimental-11.patch": "b83c1b4f2559ac602370fbb87e6e0fa2c51a93a7657c14f5b057fab0aff6dcb6",
         "proton/experimental-11-shared-resource-adapter.patch": "33a4268c4a9559c73e8a26b9e55810b1880b20ce3daae5c02e7ec3a945d0111d",
-        "proton/wine-shared-fence-context.patch": "0f83d658403845ae56db0107695dc21172bf1d3cc891d0c3d682642cc595c812"
+        "proton/wine-shared-fence-context.patch": "0f83d658403845ae56db0107695dc21172bf1d3cc891d0c3d682642cc595c812",
+        "wine-d2d1-free-vertex-types.patch": "69854caf8cac3a01e49d0d7ee92a46213bc169423821223e6b7fbf4f9aa3a184"
       },
       "sources": {
         "experimental-11-wine.tar.gz": "0fbe03925523e4cb544c6183528bb3022d725e6a4c9c51c96b85f2429d65d34c",
@@ -535,7 +537,8 @@
         "files/lib/wine/x86_64-unix/winex11.so": "edaf6e5d2a4e5204471b957fc6a96735588635927c1797e36917a010f2f249db"
       },
       "patches": {
-        "proton/cachyos-10.patch": "8ddf687850a02d69ede0398f3554fcfab4128af79a7b1c783443a4cf98b68fe4"
+        "proton/cachyos-10.patch": "8ddf687850a02d69ede0398f3554fcfab4128af79a7b1c783443a4cf98b68fe4",
+        "wine-d2d1-free-vertex-types.patch": "69854caf8cac3a01e49d0d7ee92a46213bc169423821223e6b7fbf4f9aa3a184"
       },
       "sources": {
         "cachyos-10-wine.tar.gz": "066f68466fce324164c36dc4995b2eb9e7d8512da1f12aacd76493a10eb12287"
@@ -702,7 +705,8 @@
       "patches": {
         "proton/cachyos-11.patch": "0992d4c491f37f041490743612b81dd5b2f79ddd618c5c57f91dc03e518373e2",
         "proton/cachyos-11-shared-resource-adapter.patch": "4f929e8cec81d54d68d43093511eca12b7b35135a8ebe9382aa1b9ee937b9024",
-        "proton/wine-shared-fence-context.patch": "0f83d658403845ae56db0107695dc21172bf1d3cc891d0c3d682642cc595c812"
+        "proton/wine-shared-fence-context.patch": "0f83d658403845ae56db0107695dc21172bf1d3cc891d0c3d682642cc595c812",
+        "wine-d2d1-free-vertex-types.patch": "69854caf8cac3a01e49d0d7ee92a46213bc169423821223e6b7fbf4f9aa3a184"
       },
       "sources": {
         "cachyos-11-wine.tar.gz": "b7b036c82661104119694d7ede2a563fea9883f9e75e3c07cfde7632b56a5218",
