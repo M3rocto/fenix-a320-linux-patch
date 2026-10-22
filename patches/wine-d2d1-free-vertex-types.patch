@@ -1,0 +1,22 @@
+From: Giang Nguyen <nen24t@gmail.com>
+Subject: [PATCH] d2d1: Free the vertex types array in d2d_figure_cleanup.
+
+Backport of upstream Wine commit 4ae80e26e5bd6bc30e0e7e7fe3b1a60895f896de
+(https://bugs.winehq.org/show_bug.cgi?id=59916). The hunk is anchored at the
+top of d2d_figure_cleanup() so that it applies unchanged to the base,
+experimental-11, cachyos-10 and cachyos-11 sources.
+
+d2d_figure_cleanup() frees a path figure's vertices, bezier controls
+and segment data, but never frees the separately allocated
+vertex_types array, leaking it for every path geometry figure.
+---
+--- a/dlls/d2d1/geometry.c
++++ b/dlls/d2d1/geometry.c
+@@ -1219,6 +1219,7 @@
+ 
+ static void d2d_figure_cleanup(struct d2d_figure *figure)
+ {
++    free(figure->vertex_types);
+     free(figure->original_bezier_controls);
+     free(figure->bezier_controls);
+     free(figure->vertices);
