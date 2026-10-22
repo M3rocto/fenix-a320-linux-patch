@@ -1512,6 +1512,11 @@ pub fn install(
                     &root.join("private/fenix-downloads"),
                     &bundle,
                     progress,
+                )?;
+                system.prepare_desktop_runtime(
+                    wine.as_ref(),
+                    &root.join("private/fenix-downloads"),
+                    progress,
                 )
             })();
             wine.stop()?;
@@ -1876,6 +1881,11 @@ pub fn run_app(
         .open(log)
         .map_err(|error| Error::io_path(&error, log))?;
     let wine = system.wine(prefix, runner, &output);
+    system.prepare_desktop_runtime(
+        wine.as_ref(),
+        &fsx::parent(log).join("fenix-downloads"),
+        progress,
+    )?;
     ensure_ui_fonts(prefix, runner, wine.as_ref())?;
     // Wine's fallback notification area otherwise becomes a separate
     // blank window on desktops without an XEmbed tray. Scope to this
@@ -1886,9 +1896,11 @@ pub fn run_app(
         "0",
         "REG_DWORD",
     )?;
-    progress(
-        "Fenix is open. Complete its setup or sign-in, then close the application to continue.",
-    )?;
+    progress(if executable.is_some() || manager {
+        "The official Fenix Installer is open. Sign in and install the A320 for your simulator. Wait until the aircraft installation has finished, then close the official installer to continue."
+    } else {
+        "Fenix is open. Sign in and activate your aircraft, then close the application to continue."
+    })?;
     let env = wine_env(system, prefix, runner);
     let mut cmd = Cmd::new(argv![wine_binary(runner), &app]);
     cmd.cwd = Some(fsx::parent(&app));

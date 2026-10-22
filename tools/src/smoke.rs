@@ -506,7 +506,11 @@ impl Stage<'_, '_> {
             ctx.run_checked(&cmd).map(|_| ())
         })();
         finally(ctx, checked, terminate(&mut guard, &guard_argv))?;
-        for name in ["path-metrics-probe", "stroke-joins-probe"] {
+        for name in [
+            "path-metrics-probe",
+            "stroke-joins-probe",
+            "d2d-lifetime-probe",
+        ] {
             let target = work.join(format!("{name}.exe"));
             self.host(
                 argv![

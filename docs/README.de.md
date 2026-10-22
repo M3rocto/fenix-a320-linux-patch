@@ -22,6 +22,10 @@ Fenix ist ungetestet.
    Legacy-FCU-Anzeigen erst nach dem ersten Laden des Flugzeugs an, folgt dafür
    ein weiterer Schritt.
 
+   Im offiziellen Fenix-Installer anmelden und **den A320 für den gewählten
+   Simulator installieren**. Den Abschluss der Flugzeuginstallation abwarten
+   und erst danach den offiziellen Installer schließen.
+
 Eine frühere Installation (preview.5 oder preview.6) aktualisiert **Patch
 aktualisieren** an Ort und Stelle: Profil, Fenix, Anmeldung und Einstellungen
 bleiben erhalten. preview.5 startete den Simulator aus Steam nicht, weil eine
@@ -31,6 +35,13 @@ Seit preview.7 ist der Installer ein einzelnes Programm ohne Python.
 preview.8 ergänzt GPU-Anzeigen für die festgelegten Xodus- und
 Proton-11-Versionen. CachyOS Proton 10 bleibt beim CPU-Modus.
 [GPU-Korrekturen und Prüfstand](gpu-displays.md).
+
+preview.9 behebt einen Direct2D-Speicherverlust und begrenzt die Verarbeitung
+fast zusammenfallender Kurven. Vor dem Fenix-Installer wird die anhand ihrer
+Prüfsumme verifizierte .NET-10-Desktop-Runtime installiert; eine fehlende
+Runtime wird auch beim späteren Öffnen ergänzt. Das beseitigt die gemeldete
+fehlende Voraussetzung für Fenix v3. Ein vollständiger v3-Flug wurde noch nicht
+unabhängig geprüft.
 
 Der Installer legt das eigene Proton an, weil Steam Proton Experimental laufend
 aktualisiert und die Korrekturen zu genau einem Wine-Stand gehören. Andere

@@ -1,0 +1,45 @@
+Subject: [PATCH] d2d1: Stop subdividing degenerate overlapping control triangles.
+
+Adapted from M3rocto's synthetic reproducer and withdrawn patch in:
+https://github.com/marselnenaj/fenix-a320-linux-patch/pull/9
+This loop has not been identified as the cause of the simulator display freeze.
+
+Nearly coincident curves can remain overlapping after subdivision because of
+floating-point rounding. Stop when both control triangles are tiny. Reject a
+non-finite area on either side as well: comparing a finite area to NaN would
+otherwise repeatedly select the NaN curve, without ever reducing the other.
+
+The tolerance is absolute in path coordinates, before the world transform.
+Also reject NaN line-intersection parameters before they create invalid path
+vertices (Wine bug 51139). Ordered comparisons alone otherwise accept 0/0.
+
+--- a/dlls/d2d1/geometry.c
++++ b/dlls/d2d1/geometry.c
+@@ -2274,7 +2274,7 @@
+         t = (intersection.x - q[0]->x) / (q[1]->x - q[0]->x);
+     else
+         t = (intersection.y - q[0]->y) / (q[1]->y - q[0]->y);
+-    if (t < 0.0f || t > 1.0f)
++    if (!(t >= 0.0f && t <= 1.0f))
+         return TRUE;
+ 
+     d2d_point_lerp(&intersection, q[0], q[1], t);
+@@ -3419,7 +3419,17 @@
+         {
+             while (d2d_geometry_check_bezier_overlap(geometry, &idx_p, &idx_q))
+             {
+-                if (fabsf(d2d_geometry_bezier_ccw(geometry, &idx_q)) > fabsf(d2d_geometry_bezier_ccw(geometry, &idx_p)))
++                float area_p = fabsf(d2d_geometry_bezier_ccw(geometry, &idx_p));
++                float area_q = fabsf(d2d_geometry_bezier_ccw(geometry, &idx_q));
++
++                /* Rounding can leave nearly coincident control triangles
++                 * overlapping forever. Non-finite areas cannot be resolved
++                 * by subdivision either. The tolerance is in path units. */
++                if (!isfinite(area_p) || !isfinite(area_q)
++                        || (area_p < 1e-5f && area_q < 1e-5f))
++                    break;
++
++                if (area_q > area_p)
+                 {
+                     if (!d2d_geometry_split_bezier(geometry, &idx_q))
+                         return E_OUTOFMEMORY;

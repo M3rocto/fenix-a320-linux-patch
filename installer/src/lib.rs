@@ -7,6 +7,7 @@
 //! state files, messages and the handling of files stay what they were.
 pub mod cli;
 pub mod core;
+pub mod desktop;
 pub mod download;
 pub mod error;
 pub mod fsx;

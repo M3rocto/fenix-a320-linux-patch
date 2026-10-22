@@ -794,6 +794,28 @@ fn failed_interactive_waiter_reaps_child_and_releases_lock() {
 }
 
 #[test]
+fn opening_fenix_repairs_the_desktop_runtime_and_stops_before_launch_if_it_fails() {
+    let fx = Fixture::new();
+    fx.install().unwrap();
+    assert_eq!(fx.mock.desktop.count(), 1);
+    put(
+        &fx.prefix.join(core::PROGRAM).join("Fenix.exe"),
+        "synthetic app",
+    );
+    fx.mock
+        .desktop
+        .fail(Some(Error::patch("desktop runtime failed")));
+    let error =
+        core::windows_app(&fx.mock, fx.root.as_os_str(), None, &silent, false, None).unwrap_err();
+    assert_eq!(error, Error::patch("desktop runtime failed"));
+    assert!(fx.mock.spawned.lock().unwrap().is_empty());
+    fx.mock.desktop.fail(None);
+    core::windows_app(&fx.mock, fx.root.as_os_str(), None, &silent, false, None).unwrap();
+    assert_eq!(fx.mock.desktop.count(), 3);
+    assert_eq!(fx.mock.spawned.lock().unwrap().len(), 1);
+}
+
+#[test]
 fn legacy_profile_can_open_installed_fenix_but_cannot_run_an_installer() {
     let fx = Fixture::new();
     put(&fx.root.join("private/fenix-compat.json"), "{}");

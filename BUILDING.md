@@ -137,6 +137,9 @@ Xvfb), and download pinned Microsoft geometry dependencies. They compare route
 metrics and rasterized stroke contours with an independent geometry reference,
 check actual X11 mapping as well as Win32 visibility, and run the existing
 loader, cursor, write-copy, IOCP and audio regressions.
+The Direct2D lifetime probe checks live heap growth after 300,000 geometries
+on both normal and error paths, and 20,000 deterministic near-degenerate paths
+with a per-case watchdog. See [lifetime and termination](docs/d2d-lifetime.md).
 An overlay with its own `dxvk` block also tests the native DXGI/D3D11 and
 VKD3D-Proton libraries: shared-resource ownership on every enumerated adapter,
 1,000 cross-process texture frames with pixel verification and GPU fence

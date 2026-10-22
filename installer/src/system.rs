@@ -99,6 +99,15 @@ pub trait System: AsSystem + Send + Sync {
         core::graphics_and_fonts(prefix, runner, wine)
     }
 
+    fn prepare_desktop_runtime(
+        &self,
+        wine: &dyn Wine,
+        cache: &Path,
+        progress: Progress<'_>,
+    ) -> Result<()> {
+        crate::desktop::prepare(self.as_system(), wine, cache, progress)
+    }
+
     fn prepare_geometry(
         &self,
         wine: &dyn Wine,

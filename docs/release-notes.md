@@ -1,3 +1,31 @@
+# 0.1.0-preview.9 — 22 October 2026
+
+* All four overlays free Direct2D figure vertex types, backporting Wine
+  `4ae80e26e5` from M3rocto's PR #10. This fixes the per-geometry leak
+  reported in issue #8; long-flight process memory behaviour remains unvalidated.
+* Nearly coincident Bézier control triangles have a subdivision limit;
+  non-finite areas and invalid line-intersection parameters are rejected.
+  The new stress test also found two cyclic triangulation walks, which now
+  return an error through the normal cleanup path. Only `d2d1.dll` changes in
+  each Wine overlay. These failures reproduce with synthetic paths; they are
+  not a confirmed cause or fix for displays freezing in the simulator. See
+  [geometry lifetime and termination](d2d-lifetime.md)
+  for the reproducible checks and the absolute path-unit tolerance.
+* The standalone installer prepares the pinned Microsoft .NET 10.0.13 x64
+  Desktop Runtime, required by the Fenix v3 installer (issue #7), alongside
+  .NET Framework 4.8. The runtime is also prepared when updating an existing
+  Steam installation and checked before opening an official Fenix application;
+  an incomplete installation prevents that launch. Downloads are checksum-verified and not included
+  in the release. Runtime installation, host discovery and an own-code WPF
+  window were checked in a separate CachyOS 11 profile; an actual v3 flight
+  remains unvalidated.
+* Setup explicitly asks to sign in and install the A320 for the selected
+  simulator inside the official installer, wait for aircraft installation to
+  finish, then close it (issue #6).
+* Verified preview.8 installations are recognized as update sources. Existing
+  aircraft, renderer preferences, sign-in and the original restore point are
+  retained by the existing update flow.
+
 # 0.1.0-preview.8 — 20 October 2026
 
 * Preview.8 adds GPU display transport for the pinned Xodus and Proton 11

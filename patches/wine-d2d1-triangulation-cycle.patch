@@ -1,0 +1,109 @@
+Subject: [PATCH] d2d1: Fail cyclic triangulation walks instead of overflowing the stack.
+
+The deterministic near-degenerate path probe added for issue #8 finds an edge
+cut that revisits the same five edges (case 2629), and a segment insertion
+that recurses with the same origin indefinitely (case 7577). Bound both walks
+by the number of edges; a straight segment cannot legitimately visit more.
+Propagate failure before destroying edges in an unsuccessful cut recursion.
+
+--- a/dlls/d2d1/geometry.c
++++ b/dlls/d2d1/geometry.c
+@@ -2031,42 +2031,55 @@
+     return TRUE;
+ }
+ 
+-static void d2d_cdt_cut_edges(struct d2d_cdt *cdt, struct d2d_cdt_edge_ref *end_edge,
+-        const struct d2d_cdt_edge_ref *base_edge, size_t start_vertex, size_t end_vertex)
++static BOOL d2d_cdt_cut_edges(struct d2d_cdt *cdt, struct d2d_cdt_edge_ref *end_edge,
++        const struct d2d_cdt_edge_ref *base_edge, size_t start_vertex, size_t end_vertex, size_t budget)
+ {
+     struct d2d_cdt_edge_ref next;
+     float ccw;
+ 
++    /* A straight cut cannot cross more edges than the triangulation owns.
++     * Rounding in nearly coincident segments can otherwise create a cycle. */
++    if (!budget)
++        return FALSE;
++
+     d2d_cdt_edge_next_left(cdt, &next, base_edge);
+     if (d2d_cdt_edge_destination(cdt, &next) == end_vertex)
+     {
+         *end_edge = next;
+-        return;
++        return TRUE;
+     }
+ 
+     ccw = d2d_cdt_ccw(cdt, d2d_cdt_edge_destination(cdt, &next), end_vertex, start_vertex);
+     if (ccw == 0.0f)
+     {
+         *end_edge = next;
+-        return;
++        return TRUE;
+     }
+ 
+     if (ccw > 0.0f)
+         d2d_cdt_edge_next_left(cdt, &next, &next);
+ 
+     d2d_cdt_edge_sym(&next, &next);
+-    d2d_cdt_cut_edges(cdt, end_edge, &next, start_vertex, end_vertex);
++    if (!d2d_cdt_cut_edges(cdt, end_edge, &next, start_vertex, end_vertex, budget - 1))
++        return FALSE;
+     d2d_cdt_destroy_edge(cdt, &next);
++    return TRUE;
+ }
+ 
+ static BOOL d2d_cdt_insert_segment(struct d2d_cdt *cdt, struct d2d_geometry *geometry,
+-        const struct d2d_cdt_edge_ref *origin, struct d2d_cdt_edge_ref *edge, size_t end_vertex)
++        const struct d2d_cdt_edge_ref *origin, struct d2d_cdt_edge_ref *edge, size_t end_vertex, size_t budget)
+ {
+     struct d2d_cdt_edge_ref base_edge, current, new_origin, next, target;
+     size_t current_destination, current_origin;
++    size_t remaining = 2 * cdt->edge_count;
++
++    if (!budget)
++        return FALSE;
+ 
+     for (current = *origin;; current = next)
+     {
++        if (!remaining--)
++            return FALSE;
+         d2d_cdt_edge_next_origin(cdt, &next, &current);
+ 
+         current_destination = d2d_cdt_edge_destination(cdt, &current);
+@@ -2084,7 +2097,7 @@
+                 == (cdt->vertices[end_vertex].y > cdt->vertices[current_origin].y))
+         {
+             d2d_cdt_edge_sym(&new_origin, &current);
+-            return d2d_cdt_insert_segment(cdt, geometry, &new_origin, edge, end_vertex);
++            return d2d_cdt_insert_segment(cdt, geometry, &new_origin, edge, end_vertex, budget - 1);
+         }
+ 
+         if (d2d_cdt_rightof(cdt, end_vertex, &next) && d2d_cdt_leftof(cdt, end_vertex, &current))
+@@ -2092,7 +2105,8 @@
+             d2d_cdt_edge_next_left(cdt, &base_edge, &current);
+ 
+             d2d_cdt_edge_sym(&base_edge, &base_edge);
+-            d2d_cdt_cut_edges(cdt, &target, &base_edge, d2d_cdt_edge_origin(cdt, origin), end_vertex);
++            if (!d2d_cdt_cut_edges(cdt, &target, &base_edge, d2d_cdt_edge_origin(cdt, origin), end_vertex, cdt->edge_count))
++                return FALSE;
+             d2d_cdt_destroy_edge(cdt, &base_edge);
+ 
+             if (!d2d_cdt_connect(cdt, &base_edge, &target, &current))
+@@ -2107,7 +2121,7 @@
+             if (d2d_cdt_edge_origin(cdt, edge) == end_vertex)
+                 return TRUE;
+             new_origin = *edge;
+-            return d2d_cdt_insert_segment(cdt, geometry, &new_origin, edge, end_vertex);
++            return d2d_cdt_insert_segment(cdt, geometry, &new_origin, edge, end_vertex, budget - 1);
+         }
+ 
+         if (next.idx == origin->idx)
+@@ -2177,7 +2191,7 @@
+             if (start_vertex == end_vertex)
+                 continue;
+ 
+-            if (!d2d_cdt_insert_segment(cdt, geometry, &edge, &new_edge, end_vertex))
++            if (!d2d_cdt_insert_segment(cdt, geometry, &edge, &new_edge, end_vertex, cdt->edge_count))
+                 return FALSE;
+             edge = new_edge;
+         }

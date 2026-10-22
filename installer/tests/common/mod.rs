@@ -197,6 +197,7 @@ pub struct Mock {
     pub manifest: Mutex<Manifest>,
     pub wine: Arc<WineCalls>,
     pub framework: Step,
+    pub desktop: Step,
     pub graphics: Step,
     pub geometry: Step,
     /// `patch.object(os, "rename", side_effect=...)`: an error to raise instead of renaming.
@@ -237,6 +238,7 @@ impl Mock {
             manifest: Mutex::new(manifest),
             wine: Arc::new(WineCalls::default()),
             framework: Step::default(),
+            desktop: Step::default(),
             graphics: Step::default(),
             geometry: Step::default(),
             rename: Mutex::new(None),
@@ -328,6 +330,15 @@ impl System for Mock {
 
     fn graphics_and_fonts(&self, _prefix: &Path, _runner: &Path, _wine: &dyn Wine) -> Result<()> {
         self.graphics.call()
+    }
+
+    fn prepare_desktop_runtime(
+        &self,
+        _wine: &dyn Wine,
+        _cache: &Path,
+        _progress: Progress<'_>,
+    ) -> Result<()> {
+        self.desktop.call()
     }
 
     fn prepare_geometry(

@@ -229,7 +229,11 @@ fn expected_calls(work: &str, payload: &str, original: &str, container: bool) ->
     expected.push(format!(
         "wine [{at}/FenixDisplay.exe] [0] cwd={at} {prefix} WINE_TRACK_WRITECOPY=1 WINE_FENIX_HELPER_WINDOWS=0 DISPLAY=<X>"
     ));
-    for name in ["path-metrics-probe", "stroke-joins-probe"] {
+    for name in [
+        "path-metrics-probe",
+        "stroke-joins-probe",
+        "d2d-lifetime-probe",
+    ] {
         expected.extend([
             format!(
                 "x86_64-w64-mingw32-g++ [-O2] [-static] [-o] [{at}/{name}.exe] [<LAB>/repo/tests/{name}.cpp] \
@@ -318,7 +322,7 @@ fn a_whole_smoke_test_runs_every_probe_and_stops_wine() {
         outcome.output,
         format!(
             "container start OK\n\n32-bit server ABI OK\r\n\
-             geometry stand-in: {} {}\n{}{}{scoped}{scoped}",
+             geometry stand-in: {} {}\n{}{}{scoped}{scoped}{scoped}",
             base.join("cache").display(),
             fixture.tree.root.display(),
             probe_lines(),
@@ -376,7 +380,7 @@ fn a_whole_smoke_test_runs_every_probe_and_stops_wine() {
             "compiled window-guard-probe.c\n",
         ),
         // The last probe that ran under this name.
-        ("FenixDisplay.exe", "compiled stroke-joins-probe.cpp\n"),
+        ("FenixDisplay.exe", "compiled d2d-lifetime-probe.cpp\n"),
         ("Fenix.exe", "compiled window-guard-probe.c\n"),
         ("prefix/drive_c/windows/Fonts/georgia.ttf", "georgia.ttf"),
         ("prefix/drive_c/windows/Fonts/tahomabd.ttf", "tahomabd.ttf"),

@@ -1,6 +1,6 @@
 [package]
 name = "fenix-patch"
-version = "0.1.0-preview.8"
+version = "0.1.0-preview.9"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

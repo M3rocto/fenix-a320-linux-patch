@@ -831,6 +831,30 @@ fn update_replaces_the_overlay_and_keeps_the_profile() {
 }
 
 #[test]
+fn updating_prepares_desktop_10_before_changing_the_overlay() {
+    let fx = Fixture::new();
+    fx.install(&fx.item).unwrap();
+    assert_eq!(fx.mock.desktop.count(), 1);
+    let before = fx.state(&fx.item);
+    let tool_before = fx.tool_state();
+    fx.release();
+    fx.mock
+        .desktop
+        .fail(Some(Error::patch("desktop runtime failed")));
+    assert_patch_error(fx.install(&fx.item), "desktop runtime failed");
+    assert_eq!(fx.state(&fx.item), before);
+    assert_eq!(fx.tool_state(), tool_before);
+    assert_eq!(
+        read(&fx.tool().join("files/bin/wineserver")),
+        "new files/bin/wineserver"
+    );
+    fx.mock.desktop.fail(None);
+    fx.install(&fx.item).unwrap();
+    assert_eq!(fx.mock.desktop.count(), 3);
+    assert_eq!(fx.state(&fx.item)["version"], "fixture-next");
+}
+
+#[test]
 fn update_of_a_shared_tool_reaches_both_simulators() {
     let fx = Fixture::new();
     let other = fx.other();

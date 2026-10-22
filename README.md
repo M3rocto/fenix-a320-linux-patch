@@ -10,6 +10,12 @@ This packages the Wine fixes tested with Fenix **2.4.0.4720**, MSFS 2024
 FCU and radio display rendering were checked in a running cockpit. A complete
 flight and other Fenix versions have not been independently validated.
 
+**Preview.9** fixes a Direct2D geometry memory leak on all four runners and
+limits subdivision of nearly coincident curves. It also prepares the verified
+Microsoft .NET 10 Desktop Runtime required by the Fenix v3 installer. The setup
+now explicitly asks you to install the A320 inside the official installer before
+closing it. See [the changes and validation](docs/release-notes.md).
+
 **Preview.8** adds GPU display sharing for the pinned Xodus and
 Proton 11 runners. It fixes the missing shared-texture adapter query and
 Proton 11's cross-process fence state. The Xodus path has been checked in a
@@ -36,6 +42,10 @@ available. See
    patch, let Steam use **Proton Fenix A320**, run the official Fenix Installer,
    sign in, apply the display settings. Finished steps are ticked, so you can
    close the setup and continue later.
+
+   In the official Fenix Installer, sign in and **install the A320 for your
+   simulator**. Wait until the aircraft installation has finished, then close
+   the official installer to continue with the Linux setup.
 
 The installer creates the separate Proton because Steam keeps updating Proton
 Experimental; your other Proton versions and games are not changed. With Steam
@@ -65,8 +75,11 @@ one of the exact Xodus/Proton builds pinned in `bundle.json`. From preview.7
 on, the installer is a single self-contained program and needs no Python or
 other runtime; preview.6 and earlier need Python 3.10+. The guided
 setup uses your web browser and needs no additional packages. The Microsoft Framework and geometry
-downloads need internet access. The official Fenix Installer handles its
-WebView2, .NET Desktop Runtime and Visual C++ prerequisites.
+downloads need internet access. The Linux setup installs the checksum-verified
+x64 .NET 10 Desktop Runtime before starting the Fenix Installer and repairs a
+missing runtime on subsequent launches. The official Fenix Installer handles
+its WebView2, Visual C++ and any other version-specific prerequisites. Fenix v3
+flight compatibility has not been independently validated.
 
 Flightdeck can switch a patched installation between supported runners while
 retaining aircraft, add-ons and settings. Each overlay is compiled from that
@@ -101,7 +114,7 @@ geometry dependency, copies the existing runner's fonts and graphics dependencie
 and installs the compatibility overlay after the staging Wine session exits. It retains the
 original runner, profile and launch scripts. An interrupted installation has a
 recovery journal. Repeating an already completed installation verifies its files.
-Running `install` from preview.8 also updates verified preview.1–preview.7 installations,
+Running `install` from preview.9 also updates verified preview.1–preview.8 installations,
 retaining installed aircraft, settings and the original restore point. On Steam it
 replaces an earlier supported overlay in place. An earlier automatic CPU setting
 migrates to GPU when the selected overlay supports it. An explicit

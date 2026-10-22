@@ -204,8 +204,9 @@ pub fn overview(target: &dyn Target) -> Result<Value> {
         "installer",
         "Run the official Fenix Installer",
         fenix_installed,
-        "Download the installer from your Fenix account, choose the file here and complete it as on Windows, \
-         including the prerequisites it offers. Close it when it has finished."
+        "Download the installer from your Fenix account and choose the file here. In the official installer, \
+         sign in and install the A320 for your simulator, including the prerequisites it offers. \
+         Wait until the aircraft installation has finished, then close the official installer to continue."
             .to_string(),
         "Run Fenix Installer",
     );

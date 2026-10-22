@@ -1005,6 +1005,26 @@ pub fn update(
             system.ensure_idle(&other.prefix())?;
         }
     }
+    // Existing guided setups can already be complete. Install the new v3
+    // prerequisite during an update even when the user need not reopen Fenix.
+    {
+        let path = item.state().join("desktop-runtime.log");
+        let log = OpenOptions::new()
+            .append(true)
+            .create(true)
+            .custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32)
+            .mode(0o600)
+            .open(&path)
+            .map_err(|error| Error::io_path(&error, &path))?;
+        let wine = system.wine(&item.prefix(), &tool, &log);
+        let prepared = system.prepare_desktop_runtime(
+            wine.as_ref(),
+            &item.state().join("downloads"),
+            progress,
+        );
+        let stopped = wine.stop();
+        prepared.and(stopped)?;
+    }
     progress(&format!(
         "Updating the Fenix Proton from {} to {} …",
         json::text(&installed),
@@ -1184,6 +1204,11 @@ pub fn install(
                     wine.as_ref(),
                     &state_directory.join("downloads"),
                     &bundle,
+                    progress,
+                )?;
+                system.prepare_desktop_runtime(
+                    wine.as_ref(),
+                    &state_directory.join("downloads"),
                     progress,
                 )
             })();
