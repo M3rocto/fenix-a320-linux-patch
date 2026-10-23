@@ -12,11 +12,11 @@ the available evidence.
 
 | Item | Current state |
 | --- | --- |
-| v3 Display/Gateway failures, [#7](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/7) | Graphics initialization narrowed down; effective NVIDIA HRESULT unknown. Gateway spin not reproduced. Source configuration corrected; reporter asked to test the exact ntsync switch. |
+| v3 Display/Gateway failures, [#7](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/7) | Disabling ntsync did not help. Display Vulkan device creation returns `VK_ERROR_INITIALIZATION_FAILED`; a Display-only descriptor-heap comparison is pending. Gateway's sustained spin remains unresolved; a separate ReadyToRun comparison is pending. See [startup diagnostics](display-startup.md). |
 | FenixSystem memory growth, [#12](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/12) | Separate v2 report; aggregate measurements requested. Cause and fix unknown. The Display geometry correction is not a System-memory fix. |
 | v3 stability | User-confirmed local Xodus cockpit and bounded production restarts; full-flight stability and the earlier Wine assertion remain unresolved. |
-| Packaging and upgrades | Preview.10 hashes retained as upgrade snapshots; native runner/module pins unchanged. Candidate checks must pass before publication. |
-| Flightdeck | 0.2.18 pins preview.10. Prepare matching synchronization changes; switch the patch pin after the final public archive and checksum exist. |
+| Packaging and upgrades | Preview.10 hashes retained as upgrade snapshots; native runner/module pins unchanged. Local static-installer packaging, source/hash verification and real-archive upgrade checks on all four pinned runners pass. Recheck the final artifacts before publication. |
+| Flightdeck | Public 0.2.18 pins preview.10. [Draft 0.2.19 integration](https://github.com/marselnenaj/flightdeck-msfs-2024-linux-xbox/pull/6) prepares the synchronization changes and a private candidate pin; it must use the exact final public archive and checksum before merging or shipping. |
 
 ## Publication sequence
 
