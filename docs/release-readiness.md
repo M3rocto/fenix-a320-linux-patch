@@ -18,7 +18,7 @@ the available evidence.
 | FenixSystem memory growth, [#12](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/12) | Supplied v2 CSVs confirm private/anonymous growth: stationary linear fit 29.41 MiB/min. The reporter withdrew the large OutputReport estimate; repeated signing-certificate data is the main new lead. A bounded own-code query control does not reproduce sustained growth when both returned handles are closed. The Fenix caller and platform attribution remain unverified; no System-memory fix is claimed. See [measurements and limits](system-memory.md). |
 | v3 stability | User-confirmed local Xodus cockpit and bounded production restarts; full-flight stability and the earlier Wine assertion remain unresolved. |
 | Packaging and upgrades | Preview.10 snapshots retained. Only four PE NTDLL payload pins change for preview.11; native exports, source replay and loader controls pass. The regular draft still requires current source/archive verification. |
-| Flightdeck | 0.2.19 adopts the exact preview.11 archive and aligns synchronization settings. A switch to regular 0.1.0 requires its final public archive and checksum. The old prepared stable manifest is superseded by the new native payloads. |
+| Flightdeck | 0.2.20 adds independent compatible patch discovery and safe updates. Preview.11 remains the embedded fallback. A regular 0.1.0 needs its final public archive and matching update descriptor; changed runner/setup contracts still require a Flightdeck update. The old prepared stable manifest is superseded. |
 
 ## Publication sequence
 
@@ -27,8 +27,9 @@ the available evidence.
 2. Complete candidate installer, upgrade/restore, source and native checks.
 3. Build and verify ZIP, corresponding source and checksum manifest; publish
    a new `v0.1.0` release without rewriting earlier releases.
-4. Update Flightdeck to the public manifest, validate real archive upgrades on
-   all four pinned runners and publish the matching Flightdeck version.
+4. Publish the matching Flightdeck update descriptor and validate real archive
+   upgrades on all four pinned runners. Flightdeck 0.2.20+ discovers compatible
+   releases independently; publish a launcher update if its integration changes.
 5. Reply to issues with exact fixed versions and validation limits.
 
 Flightdeck follows preview.11 while regular-release preparation continues.

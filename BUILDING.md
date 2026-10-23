@@ -192,10 +192,12 @@ Rust crates linked into the installer under `licenses/rust/`. It creates:
 * `*-linux-x86_64.zip`: standalone installer program, Wine overlay, complete sources.
 * `*-source.tar.gz`: complete corresponding source, including upstream archives.
 * `SHA256SUMS`: checksums for both downloads.
-* `flightdeck-release.json`: the pinned URL/hash used by Flightdeck.
+* `flightdeck-release.json`: the pinned URL/hash used as Flightdeck's fallback.
+* `flightdeck-update.json`: complete manifest, ZIP size/hash, installer contract
+  and minimum Flightdeck version for independent updates in Flightdeck 0.2.20+.
 
 Create a GitHub **prerelease** tagged `v` plus the version in `bundle.json` and attach the two
-archives plus SHA256SUMS. The tag must contain this project source and
+archives, SHA256SUMS and both Flightdeck JSON files. The tag must contain this project source and
 `bundle.json`; do not commit payload binaries or private prefixes. Use
 `docs/release-notes.md` as the release body. This GitHub release is Flightdeck's
 patch download source; no separate flightsim.to listing is maintained for it.
@@ -206,6 +208,15 @@ In Flightdeck, run `cargo run --locked -p flightdeck-tools -- probe sync-fenix
 /path/to/this/repository` after building the release. This copies the two
 checksum manifests and the licence. Flightdeck installs with its own code and
 only extracts the fixed payload files from the verified ZIP.
+
+For compatible patch updates, Flightdeck 0.2.20+ discovers `flightdeck-update.json`
+directly from published releases; a new Flightdeck release is not needed for
+native/helper hash changes alone. Preserve earlier upgrade snapshots. Contract 1
+keeps original runner identities, destination paths, server protocol, renderer
+policy and the geometry dependency unchanged. Update Flightdeck first when those
+requirements change. Attach metadata only after checking it against the exact
+public ZIP and bundle; never replace an already published archive. Stable patch
+versions use a normal release rather than GitHub's prerelease flag.
 
 The ZIP is suitable for distribution only with its source archives and notices
 intact. Microsoft redistributables and Fenix software are separate downloads;

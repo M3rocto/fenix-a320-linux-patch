@@ -2,6 +2,7 @@
 //! `release` on a synthetic repository: what the two archives contain and
 //! how, and everything that stops a release.
 #![allow(clippy::unwrap_used)]
+use fenix_patch::json::json;
 mod common;
 
 use common::{
@@ -499,6 +500,18 @@ fn both_archives_hold_the_allowlisted_files_in_a_fixed_form() {
             stem()
         )
     );
+    let update = fenix_patch::json::loads(&read(&out.join("flightdeck-update.json"))).unwrap();
+    assert_eq!(update["installer_contract"], json!(1));
+    assert_eq!(update["minimum_flightdeck_version"], json!("0.2.20"));
+    assert_eq!(update["release"]["sha256"], json!(digest(&binary_path)));
+    assert_eq!(
+        update["release"]["size"],
+        json!(fs::metadata(&binary_path).unwrap().len())
+    );
+    assert_eq!(
+        update["bundle"],
+        fenix_patch::json::loads(&read(&root.join("bundle.json"))).unwrap()
+    );
     let mut written: Vec<String> = fs::read_dir(&out)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().into_string().unwrap())
@@ -511,6 +524,7 @@ fn both_archives_hold_the_allowlisted_files_in_a_fixed_form() {
             format!("{}-linux-x86_64.zip", stem()),
             format!("{}-source.tar.gz", stem()),
             "flightdeck-release.json".to_string(),
+            "flightdeck-update.json".to_string(),
         ]
     );
 

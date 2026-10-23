@@ -34,14 +34,16 @@ See [compatibility](#compatibility) and [release readiness](docs/release-readine
 
 ### With Flightdeck
 
-1. Update to **Flightdeck 0.2.19 or later**, then close MSFS and Fenix.
+1. Update to **Flightdeck 0.2.20 or later**, then close MSFS and Fenix.
 2. Open **Mods → Fenix A320** and follow the highlighted setup step.
 3. Run the official installer from your [Fenix account](https://fenixsim.com/dashboard/).
    Sign in, install the A320 for your simulator and wait for installation to finish.
 4. Open Fenix, sign in and apply the display settings. Start MSFS through Flightdeck.
 
-Flightdeck includes the checksum-pinned preview.11 integration. Use its built-in
-panel; newer patch versions require a matching Flightdeck integration update.
+Flightdeck 0.2.20 and later check for compatible new patch releases automatically
+and apply them before the next MSFS or Fenix launch, while both are closed.
+Use **Updates** or **Mods → Fenix A320** to check or install a patch yourself.
+Aircraft files, renderer preferences and restore points are retained.
 
 ### With Steam
 

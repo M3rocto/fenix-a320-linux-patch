@@ -440,6 +440,19 @@ pub fn run(ctx: &Context<'_>, options: &Options) -> Result<()> {
         &output.join("flightdeck-release.json"),
         &(json::dumps(&release, Some(2)) + "\n"),
     )?;
+    let mut update_release = release.clone();
+    update_release["size"] = json!(fsx::stat(&binary_path)?.size());
+    let update = json!({
+        "format": 1,
+        "installer_contract": 1,
+        "minimum_flightdeck_version": "0.2.20",
+        "release": update_release,
+        "bundle": lock,
+    });
+    util::write_text(
+        &output.join("flightdeck-update.json"),
+        &(json::dumps(&update, Some(2)) + "\n"),
+    )?;
     for path in outputs {
         ctx.print(&format!(
             "{} {} bytes",

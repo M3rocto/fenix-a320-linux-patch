@@ -35,15 +35,18 @@ Die Direct2D-Speicherkorrektur und die Anpassungen für Installer 1.0.359 bleibe
 
 ### Mit Flightdeck
 
-1. Auf **Flightdeck 0.2.19 oder neuer** aktualisieren; MSFS und Fenix schließen.
+1. Auf **Flightdeck 0.2.20 oder neuer** aktualisieren; MSFS und Fenix schließen.
 2. **Mods → Fenix A320** öffnen und dem hervorgehobenen Einrichtungsschritt folgen.
 3. Den offiziellen Installer aus deinem [Fenix-Konto](https://fenixsim.com/dashboard/)
    starten. Anmelden, den A320 für deinen Simulator installieren und den Abschluss abwarten.
 4. Fenix öffnen, anmelden und die Anzeigeeinstellungen anwenden.
    Danach MSFS über Flightdeck starten.
 
-Flightdeck enthält die über eine feste Prüfsumme eingebundene preview.11-Integration. Verwende dort die integrierte Einrichtung; neuere Patch-Versionen
-benötigen eine entsprechende Anpassung in Flightdeck.
+Flightdeck 0.2.20 und neuer suchen automatisch nach kompatiblen Patch-Releases
+und installieren sie vor dem nächsten MSFS- oder Fenix-Start, während beide
+geschlossen sind. Unter **Updates** oder **Mods → Fenix A320** kannst du selbst
+prüfen und aktualisieren. Flugzeugdateien, Renderer-Wahl und Wiederherstellungspunkte
+bleiben erhalten.
 
 ### Mit Steam
 
