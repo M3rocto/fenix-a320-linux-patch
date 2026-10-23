@@ -1,10 +1,16 @@
 # Fenix v3 display and Gateway startup
 
 Issue [#7](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/7)
-reports two remaining failures with Fenix 3.0.0.7454, preview.10, Steam MSFS
+reports GPU Display and Gateway failures with Fenix 3.0.0.7454, preview.10, Steam MSFS
 2020 and the pinned CachyOS 11 runner on NVIDIA/PRIME. Installation, login,
 System connection and CDU work in the reported later sessions. Earlier path
 and PBKDF2 errors in the same attachments belong to older sessions.
+
+The [latest reporter follow-up](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/7#issuecomment-6367117808)
+confirms that **CPU rendering restores the displays**. Gateway remains
+unresolved. The comment mentions Display Safe Mode having been enabled but
+does not specify its final on/off state; that setting is not inferred here.
+CPU mode is a reported workaround, not a correction to GPU initialization.
 
 ## Synchronization configuration
 
@@ -115,12 +121,14 @@ and simulator load still differ: the probe does not render, allocate the
 application's shared textures or initialize Direct2D. A load-only cause or
 application-specific race is not established or excluded by this comparison.
 
-The next bounded comparison keeps a stationary loaded cockpit and its Display
+An optional GPU follow-up keeps a stationary loaded cockpit and its Display
 state constant: **one probe device first**, then thirteen serial devices if
 that passes, and thirteen parallel devices only if the serial batch passes.
 Stop after a failed smaller/serial case and preserve its first error. See the
 [exact comparison and launch notes](device-creation-diagnostic.md#next-comparison-stationary-cockpit-loaded).
-Graphics defaults remain unchanged pending a reproducer.
+The reporter's CPU workaround makes this comparison optional; no further GPU
+test is required to keep the restored displays working or continue the Gateway
+investigation. Graphics defaults remain unchanged pending a reproducer.
 
 ### Own-code graphics diagnostic
 

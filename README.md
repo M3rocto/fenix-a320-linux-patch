@@ -101,11 +101,11 @@ complete simulator and GPU-driver compatibility requires runtime testing.
 | 2.4.0.4720 | MSFS 2024 1.8.16.0 · Xodus 11.0 | PFD, ND, ECAM, MCDU and cockpit readouts checked locally. |
 | 2.4.0.4720 | MSFS 2024 · CachyOS 11 | Community flight report with stable Display memory and no frozen displays; the supplied trace spans nearly two hours. Separate System growth is confirmed in the supplied counters; its cause remains open. |
 | 3.0.0.7454 | MSFS 2024 1.8.16.0 · Xodus 11.0 | Official Installer 1.0.359, login, System connection and working cockpit displays checked; six bounded production starts passed. |
-| 3.0.0.7454 | Steam MSFS 2020 · CachyOS 11 · NVIDIA/PRIME | Installation, login, System and CDU work according to the report; Display initialization and Gateway startup still fail. |
+| 3.0.0.7454 | Steam MSFS 2020 · CachyOS 11 · NVIDIA/PRIME | Installation, login, System and CDU work according to the report. CPU rendering restores the displays; GPU initialization and Gateway startup remain unresolved. |
 
 Fenix v3 full-flight stability remains unvalidated, and an earlier Wine startup
 assertion is unexplained. [Issue #7](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/7)
-tracks the remaining Display/Gateway failures;
+tracks the CPU display workaround and unresolved GPU/Gateway failures;
 [#12](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/12) tracks
 separate FenixSystem memory growth. See the
 [current findings and focused diagnostics](docs/display-startup.md).

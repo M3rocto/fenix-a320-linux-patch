@@ -4,7 +4,9 @@ Issue [#12](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/12)
 tracks separate `FenixSystem.exe` growth in Fenix **2.4.0.4720**, MSFS 2024
 through Steam Flatpak, preview.9, CachyOS 11, Fedora Kinoite 44 and RX 9070.
 The [23 October follow-up](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/12#issuecomment-6364948274)
-supplies four aggregate CSVs and an application-object retention hypothesis.
+supplies four aggregate CSVs. The [subsequent correction](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/12#issuecomment-6367478956)
+withdraws the large OutputReport estimate and identifies accumulating signing-
+certificate data as the main new lead.
 We have independently recalculated the supplied counters; we have **not**
 independently reproduced the Fenix runtime behavior.
 
@@ -39,39 +41,103 @@ in this CSV are shorter than the 20-minute comparison described in the
 comment. These observations support continuing growth; they do not establish
 identical rates in every state or rule out every EFB/telemetry interaction.
 
-## OutputReport hypothesis and remaining evidence
+## Correction: OutputReport is a secondary finding
 
-The reporter describes two object-count snapshots **1020 seconds** apart:
-`ProsimCore.OutputReport` and each of seven dictionary families increase by
-**10,200** instances. The named report fields are `numerical`, `gate`,
-`indicators`, `globalNumerical`, `globalGauge`, `globalGates` and
-`globalIndicators`. They report that the dictionaries and their arrays are
-owned by the reports, which are retained in an undrained hardware-output queue.
-These type counts, ownership paths and queue behavior are **reporter findings**;
-the attached CSVs contain aggregate process counters, not object/root evidence.
+The reporter explicitly withdrew the earlier **~50 KB per report** estimate:
+it was back-calculated from total growth, rather than measured. Our earlier
+numerical comparison using 50 KiB must therefore not be treated as evidence
+that reports explain the main growth.
 
-A net increase of ten report graphs per second at approximately **50 KiB**
-each would account for **29.30 MiB/min**, close to the measured stationary
-rate. This makes retained report graphs a useful lead. Two counts establish
-net growth, not that no instances were released or that a consumer never
-started. Heap census counts also need a distinction between enumerated and
-GC-rooted live objects. Microsoft's [managed-leak investigation guide](https://learn.microsoft.com/en-us/dotnet/core/diagnostics/debug-memory-leak)
-explains the separate roles of type statistics and reference-root analysis.
+The corrected graph has eight dictionaries, usually two populated, and
+approximately **1.4 KB** of owned data per report: roughly **0.8–0.85 MiB/min**
+at ten reports/s. Shared keys are counted once. Three same-PID snapshots at
+**13:48:01, 13:58:02 and 14:08:03 UTC** have 601-second gaps. Counts rise
+from **4,900 to 16,921** over 1,202 seconds, consistent with ten/s net growth.
+Reported identified managed objects grow **13.0** and **7.2 MiB** per interval.
 
-The next useful material is any **already retained, aggregate text** from that
-analysis: tool/runtime versions and snapshot times; per-type before/after
-counts and byte totals; whether those are live/rooted objects; queue counts;
-and a root-to-queue-to-report path containing only type and field names.
-Count shared backing objects once when estimating retained bytes. No new
-flight or memory-dump upload is needed to provide existing summaries.
+The reported path is `ConcurrentQueue<T>` → 529 segments → 529 item arrays
+→ 16,916 wrappers → 16,916 of 16,921 reports. No root above the queue was
+traced. The .NET Framework **4.8.4110** DAC did not initialize; the reporter
+instead scanned aligned MethodTable headers and parent chains in an
+unsuspended process. This is a non-atomic object census, **not a GC-rooted
+live-object walk**. Net growth and the supplied chain do not establish zero
+releases, a never-started consumer, or all live ownership paths.
 
-A Fenix support report can include the exact setup, the supplied CSVs, the
-private/anonymous growth and the qualified OutputReport lead. The lack of a
-consumer and an upstream cause remain unconfirmed; no matching Windows
-control was supplied. Namespace and interface names alone do not establish
-the owning failure or platform independence. Keep #12 open while that is
-investigated. No System-memory fix or Fenix v3 qualification is claimed.
-The working Direct2D Display correction remains in place.
+## Main new lead: repeated signing-certificate data
+
+The same follow-up attributes **293** and **266 MiB** per interval to
+anonymous regions without recognized managed-object headers, containing
+copies of the executable's Authenticode X.509/PKCS#7 signing chain. Over
+601 seconds these correspond to **29.25** and **26.56 MiB/min**, or **27.90**
+combined. One CA-name count rises **35,810 → 86,645 → 137,497**: about
+**84.6 occurrences/s**. A string occurrence is not an API-call count or an
+independent allocation; the native/managed classification remains the
+reporter's inference from that census.
+Freed heap blocks can retain certificate strings and nonzero bytes, so their
+presence alone does not establish live allocations or leaked handles.
+
+The [next observation](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/12#issuecomment-6367877773)
+reports executable opens at ten/s beginning about 70 seconds after restart,
+near the onset of growth. At 30 MiB/min that would be approximately **51.2 KiB
+per open**, if each open maps to one leaking operation. The fanotify opening
+PID/TID and actual API/close counts were not supplied. File opens alone do not
+identify `CryptQueryObject`, a caller, or a release imbalance. The later
+certificate snapshots do not overlap the attached CSVs, so their attribution
+cannot be independently recalculated from those counters.
+
+The existing reload CSV only partly supports a common 60–90-second flat
+startup phase: the first five samples of new PID 40808 span 60 seconds and
+rise 5 MiB, but new PID 22034 instead rises **427 → 687 MiB in 46 seconds**.
+Both have a later 66–67 MiB downward step around 106 seconds. Fixed
+120–300-second windows have **29.40** and **30.74 MiB/min** linear-fit rates.
+These windows are timed from the first new-PID sample, not a recorded process
+creation time.
+These startup allocations and drops do not independently establish identical
+onset timing or a constant 32–36 MiB/min in both runs. The fanotify observation
+is a useful separate reporter finding, not yet an attributed API trace.
+
+Microsoft's [CryptQueryObject contract](https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-cryptqueryobject)
+assigns the returned message and certificate-store handles to the caller.
+The matching Wine path duplicates the message for its message-backed store;
+both [CryptMsgClose](https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-cryptmsgclose)
+and [CertCloseStore](https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-certclosestore)
+matter. This contract does not show which API Fenix uses or whether it closes
+every handle/context. The pinned crypt32 includes our RFC3161 content patch;
+the pinned wintrust includes the PE indirect-data patch. Reviewing Wine main
+alone cannot rule out Wine, the overlay, or managed-wrapper behavior.
+The reporter's actual preview.9 loaded-module hashes have not been verified;
+the own-code comparison below uses the current pinned candidate.
+
+## Bounded own-code control
+
+The original [certificate query probe](../tests/certificate-query/README.md)
+opens a public signed Windows .NET **10.0.13** `dotnet.exe` as a read-only
+signature fixture; it never executes that file or starts Fenix. A fresh-prefix
+run with the exact patched CachyOS 11 runner completes **8,384 queries** with
+zero API/close failures. After 128 warmup queries, a 4,000-query close-both
+series adds only **48 KiB** of working set. Retaining 256 handle pairs adds
+about **9.63 MiB**; after closing them, another 4,000-query series is flat.
+The working set stays high after release, consistent with allocator reuse;
+returning pages to the OS is not required for release. Wine reports zero for
+`PrivateUsage` throughout this test, so that field is not used as evidence.
+
+A second fresh-prefix run substitutes only the matching stock `crypt32.dll`
+and `wintrust.dll`. It also completes **8,384 queries** without failures:
+**36 KiB** working-set increase in the first closed series, **9.77 MiB** with
+256 retained pairs, and a flat second closed series. Prefix-module hashes
+confirm the selected stock/overlay DLLs. No material contrast appears for
+this fixture and query path; this does not test other trust-verification APIs.
+
+This short native control does not reproduce the large growth on the tested
+signature/query path. It does not reproduce Fenix 2's certificate, .NET
+Framework wrapper, other trust APIs, or long-running process, and does not
+establish Windows behavior. Existing aggregate API/close counts and the file-
+opening actor, if already retained, are the useful next evidence. No new
+flight, process-memory collection or dump upload is requested.
+
+The reporter is submitting the certificate lead to Fenix support. Keep #12
+open: no System-memory fix, platform attribution or Fenix v3 qualification is
+claimed. The working Direct2D Display correction remains in place.
 
 ## Optional aggregate sampling
 
