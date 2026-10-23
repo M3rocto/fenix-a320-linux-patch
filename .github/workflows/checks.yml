@@ -77,3 +77,36 @@ jobs:
         with:
           persist-credentials: false
       - run: python3 -m unittest tests/test_display_refresh.py -v
+  graphics-diagnostics:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install the diagnostic cross-compiler
+        run: sudo apt-get update && sudo apt-get install -y g++-mingw-w64-x86-64
+      - name: Build the own-code diagnostics and record provenance
+        run: |
+          mkdir -p build/graphics-diagnostics/source
+          x86_64-w64-mingw32-g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -fno-exceptions -fno-rtti -static-libgcc -static-libstdc++ \
+            tests/display-initialization-probe.cpp -o build/graphics-diagnostics/display-initialization-probe.exe \
+            -ld3d11 -ldxgi -ld2d1 -lole32 -luuid
+          x86_64-w64-mingw32-g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+            -fno-exceptions -fno-rtti -static-libgcc -static-libstdc++ \
+            tests/display-device-probe.cpp -o build/graphics-diagnostics/display-device-probe.exe \
+            -ld3d11 -ldxgi -lole32 -luuid
+          cp tests/display-initialization-probe.cpp tests/display-device-probe.cpp build/graphics-diagnostics/source/
+          cp LICENSE build/graphics-diagnostics/LICENSE
+          cp docs/device-creation-diagnostic.md build/graphics-diagnostics/README.md
+          printf 'Source commit: %s\n' "$GITHUB_SHA" > build/graphics-diagnostics/BUILD-INFO.txt
+          x86_64-w64-mingw32-g++ --version >> build/graphics-diagnostics/BUILD-INFO.txt
+          cd build/graphics-diagnostics
+          sha256sum *.exe source/*.cpp LICENSE README.md BUILD-INFO.txt > SHA256SUMS
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: fenix-graphics-diagnostics
+          path: build/graphics-diagnostics/
+          if-no-files-found: error
+          retention-days: 30

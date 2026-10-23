@@ -19,6 +19,7 @@ Start with the [project overview](../README.md) or the
 | --- | --- |
 | [Fenix v3](fenix-v3.md) | Installer/startup compatibility fixes and runtime validation limits. |
 | [Display and Gateway startup](display-startup.md) | Current #7 findings and focused comparisons for the affected setup. |
+| [Device-creation diagnostic](device-creation-diagnostic.md) | Own-code serial/parallel graphics-device comparisons and executable artifacts. |
 | [System memory](system-memory.md) | Optional aggregate measurements for the separate #12 report. |
 | [Direct2D lifetime correction](d2d-lifetime.md) | The Display memory fix and its validation. |
 | [Release readiness](release-readiness.md) | The unpublished 0.1.0 preparation and remaining issue work. |

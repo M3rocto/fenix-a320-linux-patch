@@ -13,7 +13,7 @@ the available evidence.
 
 | Item | Current state |
 | --- | --- |
-| v3 Display/Gateway failures, [#7](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/7) | Disabling ntsync did not help. Display Vulkan device creation returns `VK_ERROR_INITIALIZATION_FAILED`; a Display-only descriptor-heap comparison is pending. Gateway's sustained spin remains unresolved; a separate ReadyToRun comparison is pending. See [startup diagnostics](display-startup.md). |
+| v3 Display/Gateway failures, [#7](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/7) | Neither disabling ntsync/descriptor heaps nor enabling ReadyToRun resolves the report. Display Vulkan device creation fails with both descriptor-heap and descriptor-buffer models. A serial/parallel retained-device diagnostic and current Gateway register/backtrace samples are the next evidence. See [startup diagnostics](display-startup.md). |
 | FenixSystem memory growth, [#12](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/12) | Separate v2 report; aggregate measurements requested. Cause and fix unknown. The Display geometry correction is not a System-memory fix. |
 | v3 stability | User-confirmed local Xodus cockpit and bounded production restarts; full-flight stability and the earlier Wine assertion remain unresolved. |
 | Packaging and upgrades | Preview.10 hashes retained as upgrade snapshots; native runner/module pins unchanged. Local static-installer packaging, source/hash verification and real-archive upgrade checks on all four pinned runners pass. Recheck the final artifacts before publication. |
