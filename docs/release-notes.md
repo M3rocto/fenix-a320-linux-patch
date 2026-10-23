@@ -1,20 +1,43 @@
 # 0.1.0 — in preparation, not published
 
+The regular release remains an unpublished draft. Refresh its retained
+archives with the preview.11 Gateway correction before publication. The
+separate System-memory investigation [#12](system-memory.md), full-flight v3
+qualification and the earlier Wine assertion remain open.
+
+See [release readiness](release-readiness.md).
+
+# 0.1.0-preview.11 — experimental, 23 October 2026
+
+* Include @malik05051's [PR #15](https://github.com/marselnenaj/fenix-a320-linux-patch/pull/15):
+  add `Fenix.GqlGateway.exe` to the existing loader-name allowlist. Rebuild
+  matching x64 PE NTDLL for all four runners and repin the tested payloads.
+  The reporter confirms Gateway logging, port 8083 and a working EFB on
+  Fenix 3.0.0.7454 / Steam MSFS 2020 / CachyOS 11 / NVIDIA-PRIME.
+* Document working GPU displays on that setup with **USE DISPLAY SAFE MODE
+  off**. This setting creates two devices instead of thirteen in the supplied
+  comparison. CPU mode remains available; no new graphics override is forced.
+* Preserve existing Fenix loader behavior and unrelated executable names.
+  All **64** own-code baseline/candidate name comparisons pass across four
+  runners. Smoke now checks Gateway names and negative near-matches.
+
 * Explicitly select server synchronization for Fenix: `PROTON_NO_NTSYNC=1`
   for pinned Wine 11 and `WINE_DISABLE_FAST_SYNC=1` for CachyOS 10. Steam
   updates retain other Python settings while adding these switches; the
   standalone application's environment and legacy launch script agree.
-  This corrects a configuration mismatch, not a confirmed cause/fix of the
-  NVIDIA Display crash or Gateway spin in #7.
+  Synchronization alone did not fix #7; the Gateway correction is the separate
+  loader-name change above.
 * Retain exact preview.10 snapshots for upgrades; native overlay modules
-  and runner pins are unchanged.
+  except for the four rebuilt PE NTDLL files; runner pins stay unchanged.
 * Rewrite English/German READMEs around setup, evidence, restore and
   troubleshooting. Add an own-code graphics-initialization diagnostic and
-  document the remaining #7/#12 work.
+  document the corrected #7 findings and remaining #12 work. The earlier
+  OutputReport-size estimate is withdrawn; certificate-related accumulation
+  is the main qualified System-memory lead. No System-memory fix is claimed.
 
 See [release readiness](release-readiness.md) and the
 [Display/Gateway investigation](display-startup.md). The published download
-remains preview.10; this section does not announce a regular release.
+is preview.11; this section does not announce a regular release.
 
 # 0.1.0-preview.10 — experimental, 23 October 2026
 

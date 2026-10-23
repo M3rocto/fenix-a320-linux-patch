@@ -231,6 +231,16 @@ fn expected_calls(work: &str, payload: &str, original: &str, container: bool) ->
             ),
             format!("wine [{at}/{program}.exe] cwd={at} {env}"),
         ]);
+        if source == "loader-case-probe" {
+            for executable in [
+                "Fenix.GqlGateway.exe",
+                "fenix.gqlgateway.exe",
+                "LoaderCaseControl.exe",
+                "Fenix.GqlGateway.exe.extra",
+            ] {
+                expected.push(format!("wine [{at}/{executable}] cwd={at} {env}"));
+            }
+        }
         if source == "cwd-contract-probe" {
             expected.push(format!(
                 "wine [{at}/{program}.exe] [--negative] cwd={at} {env}"
@@ -331,6 +341,18 @@ fn window_lines() -> String {
 fn probe_lines() -> String {
     let mut lines =
         "loader-case-probe:\nloaded KERNEL32.DLL\nloaded KERNELBASE.dll\n\n".to_string();
+    for (label, kernel32, kernelbase) in [
+        ("loader-case-gateway", "KERNEL32.DLL", "KERNELBASE.dll"),
+        (
+            "loader-case-gateway-lower",
+            "KERNEL32.DLL",
+            "KERNELBASE.dll",
+        ),
+        ("loader-case-unrelated", "kernel32.dll", "kernelbase.dll"),
+        ("loader-case-suffix", "kernel32.dll", "kernelbase.dll"),
+    ] {
+        lines += &format!("{label}:\nloaded {kernel32}\nloaded {kernelbase}\n\n");
+    }
     for name in [
         "writecopy-probe",
         "iocp-smoke",
@@ -723,6 +745,20 @@ fn wine_is_stopped_whatever_a_probe_does() {
         )
     );
     fixture.world.set("FAKE_LOADER_REGRESSION", "");
+
+    fixture.world.set("FAKE_GATEWAY_LOWERCASE", "1");
+    let outcome = fixture.smoke("gateway", &[]);
+    assert_eq!(outcome.code, 1);
+    assert!(
+        outcome
+            .output
+            .ends_with(&failure("Loader spelling regression: loader-case-gateway")),
+        "{}",
+        outcome.output
+    );
+    let calls = stopped("gateway", TRACKED);
+    assert!(calls[calls.len() - 3].contains("/Fenix.GqlGateway.exe]"));
+    fixture.world.set("FAKE_GATEWAY_LOWERCASE", "");
 
     // A probe that fails ends the test; its log is kept but not shown.
     fixture.world.set("FAKE_FAILING_PROBE", "iocp-smoke.exe");

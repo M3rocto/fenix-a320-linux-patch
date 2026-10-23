@@ -22,34 +22,34 @@ für dessen Xbox-PC-Versionen oder den separaten Installer für
 **Steam-MSFS 2020 und 2024**. Installation, Anmeldung und Aktivierung erfolgen
 mit der offiziellen Fenix-Software.
 
-**Aktuell veröffentlicht: [0.1.0-preview.10](https://github.com/marselnenaj/fenix-a320-linux-patch/releases/tag/v0.1.0-preview.10).**
+**Aktuell veröffentlicht: [0.1.0-preview.11](https://github.com/marselnenaj/fenix-a320-linux-patch/releases/tag/v0.1.0-preview.11).**
 Eine reguläre Version **0.1.0** wird vorbereitet und ist noch nicht veröffentlicht.
 
-**Neu in preview.10:** Kompatibilitätskorrekturen für den offiziellen Installer
-1.0.359 und den Start von Fenix v3; GPU-Displayübertragung und die Direct2D-Speicherkorrektur bleiben enthalten. Mit Fenix 3.0.0.7454 wurden auf dem
-geprüften Xodus-/MSFS-2024-System funktionierende Cockpitanzeigen erreicht.
-Weitere gemeldete v3-Startprobleme sind offen.
+**Neu in preview.11:** Korrektur der Gateway-DLL-Namen für Fenix v3, mit
+passenden NTDLL-Builds für alle vier Runner. Auf dem betroffenen NVIDIA-System
+funktionieren laut Rückmeldung auch die GPU-Displays mit **USE DISPLAY SAFE MODE aus**.
+Die Direct2D-Speicherkorrektur und die Anpassungen für Installer 1.0.359 bleiben enthalten.
 [Kompatibilität](#kompatibilität) · [Release-Vorbereitung](release-readiness.md)
 
 ## Loslegen
 
 ### Mit Flightdeck
 
-1. Auf **Flightdeck 0.2.18 oder neuer** aktualisieren; MSFS und Fenix schließen.
+1. Auf **Flightdeck 0.2.19 oder neuer** aktualisieren; MSFS und Fenix schließen.
 2. **Mods → Fenix A320** öffnen und dem hervorgehobenen Einrichtungsschritt folgen.
 3. Den offiziellen Installer aus deinem [Fenix-Konto](https://fenixsim.com/dashboard/)
    starten. Anmelden, den A320 für deinen Simulator installieren und den Abschluss abwarten.
 4. Fenix öffnen, anmelden und die Anzeigeeinstellungen anwenden.
    Danach MSFS über Flightdeck starten.
 
-Flightdeck enthält die über eine feste Prüfsumme eingebundene preview.10-Integration. Verwende dort die integrierte Einrichtung; neuere Patch-Versionen
+Flightdeck enthält die über eine feste Prüfsumme eingebundene preview.11-Integration. Verwende dort die integrierte Einrichtung; neuere Patch-Versionen
 benötigen eine entsprechende Anpassung in Flightdeck.
 
 ### Mit Steam
 
 1. MSFS einmal über Steam starten und wieder schließen.
 2. Das **Linux-Installer-ZIP** aus dem
-   [preview.10-Release](https://github.com/marselnenaj/fenix-a320-linux-patch/releases/tag/v0.1.0-preview.10)
+   [preview.11-Release](https://github.com/marselnenaj/fenix-a320-linux-patch/releases/tag/v0.1.0-preview.11)
    herunterladen und entpacken.
 3. **Fenix A320 Linux Patch** öffnen oder `./install.sh` starten.
 4. Durch die Einrichtung führen lassen: Patch installieren,
@@ -105,11 +105,11 @@ ab; vollständige Simulator- und GPU-Treiber-Kompatibilität erfordert Laufzeitt
 | 2.4.0.4720 | MSFS 2024 1.8.16.0 · Xodus 11.0 | PFD, ND, ECAM, MCDU und Cockpit-Readouts lokal geprüft. |
 | 2.4.0.4720 | MSFS 2024 · CachyOS 11 | Flugbericht mit stabilem Display-Speicher und ohne eingefrorene Anzeigen; die übermittelte Zeitreihe umfasst knapp zwei Stunden. Separates System-Speicherwachstum ist in den Messwerten bestätigt, die Ursache bleibt offen. |
 | 3.0.0.7454 | MSFS 2024 1.8.16.0 · Xodus 11.0 | Offizieller Installer 1.0.359, Anmeldung, System-Verbindung und funktionierende Cockpitanzeigen geprüft; sechs begrenzte Starts mit Produktionsmodulen bestanden. |
-| 3.0.0.7454 | Steam MSFS 2020 · CachyOS 11 · NVIDIA/PRIME | Installation, Anmeldung, System und CDU laut Rückmeldung funktionsfähig. CPU-Rendering stellt die Displays wieder her; GPU-Initialisierung und Gateway-Start bleiben ungeklärt. |
+| 3.0.0.7454 | Steam MSFS 2020 · CachyOS 11 · NVIDIA/PRIME | GPU-Displays mit Display Safe Mode aus sowie Gateway/EFB nach der in preview.11 enthaltenen Loader-Korrektur laut Rückmeldung funktionsfähig. |
 
 Vollständige v3-Testflüge stehen aus; eine frühere Wine-Assertion beim Start ist
 ungeklärt. [Issue #7](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/7)
-verfolgt den CPU-Workaround für die Displays und die offenen GPU-/Gateway-Fehler;
+dokumentiert den Gateway-Fix und den Display-Workaround mit Safe Mode aus;
 [#12](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/12) das
 separate FenixSystem-Speicherwachstum.
 [Aktuelle Befunde und gezielte Diagnoseschritte](display-startup.md)

@@ -21,33 +21,33 @@ integration in [Flightdeck](https://github.com/marselnenaj/flightdeck-msfs-2024-
 for its Xbox PC editions, or the standalone setup for **Steam MSFS 2020 and 2024**.
 Installation, sign-in and activation use the official Fenix software.
 
-**Current public release: [0.1.0-preview.10](https://github.com/marselnenaj/fenix-a320-linux-patch/releases/tag/v0.1.0-preview.10).**
+**Current public release: [0.1.0-preview.11](https://github.com/marselnenaj/fenix-a320-linux-patch/releases/tag/v0.1.0-preview.11).**
 A regular **0.1.0** release is in preparation and remains unpublished.
 
-**New in preview.10:** Compatibility fixes for official Installer 1.0.359 and
-Fenix v3 startup, retaining the GPU display transport and Direct2D memory-leak
-correction. Fenix 3.0.0.7454 reached working cockpit displays on the tested
-Xodus/MSFS 2024 setup. Other reported v3 startup failures remain open;
-see [compatibility](#compatibility) and [release readiness](docs/release-readiness.md).
+**New in preview.11:** Gateway loader-name compatibility for Fenix v3, with
+matching NTDLL builds for all four runners. The affected NVIDIA reporter also
+confirms working GPU displays with **USE DISPLAY SAFE MODE off**.
+The Direct2D memory correction and official Installer 1.0.359 fixes are retained.
+See [compatibility](#compatibility) and [release readiness](docs/release-readiness.md).
 
 ## Get started
 
 ### With Flightdeck
 
-1. Update to **Flightdeck 0.2.18 or later**, then close MSFS and Fenix.
+1. Update to **Flightdeck 0.2.19 or later**, then close MSFS and Fenix.
 2. Open **Mods → Fenix A320** and follow the highlighted setup step.
 3. Run the official installer from your [Fenix account](https://fenixsim.com/dashboard/).
    Sign in, install the A320 for your simulator and wait for installation to finish.
 4. Open Fenix, sign in and apply the display settings. Start MSFS through Flightdeck.
 
-Flightdeck includes the checksum-pinned preview.10 integration. Use its built-in
+Flightdeck includes the checksum-pinned preview.11 integration. Use its built-in
 panel; newer patch versions require a matching Flightdeck integration update.
 
 ### With Steam
 
 1. Start your Steam edition of MSFS once, then close it.
 2. Download the **Linux installer ZIP** from the
-   [preview.10 release](https://github.com/marselnenaj/fenix-a320-linux-patch/releases/tag/v0.1.0-preview.10)
+   [preview.11 release](https://github.com/marselnenaj/fenix-a320-linux-patch/releases/tag/v0.1.0-preview.11)
    and extract it.
 3. Open **Fenix A320 Linux Patch** or run `./install.sh`.
 4. Follow the guided setup to install the patch, select **Proton Fenix A320**,
@@ -101,11 +101,11 @@ complete simulator and GPU-driver compatibility requires runtime testing.
 | 2.4.0.4720 | MSFS 2024 1.8.16.0 · Xodus 11.0 | PFD, ND, ECAM, MCDU and cockpit readouts checked locally. |
 | 2.4.0.4720 | MSFS 2024 · CachyOS 11 | Community flight report with stable Display memory and no frozen displays; the supplied trace spans nearly two hours. Separate System growth is confirmed in the supplied counters; its cause remains open. |
 | 3.0.0.7454 | MSFS 2024 1.8.16.0 · Xodus 11.0 | Official Installer 1.0.359, login, System connection and working cockpit displays checked; six bounded production starts passed. |
-| 3.0.0.7454 | Steam MSFS 2020 · CachyOS 11 · NVIDIA/PRIME | Installation, login, System and CDU work according to the report. CPU rendering restores the displays; GPU initialization and Gateway startup remain unresolved. |
+| 3.0.0.7454 | Steam MSFS 2020 · CachyOS 11 · NVIDIA/PRIME | Reporter confirms GPU displays with Display Safe Mode off and Gateway/EFB after the loader-name fix included in preview.11. |
 
 Fenix v3 full-flight stability remains unvalidated, and an earlier Wine startup
 assertion is unexplained. [Issue #7](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/7)
-tracks the CPU display workaround and unresolved GPU/Gateway failures;
+records the Gateway fix and the Display Safe Mode-off workaround;
 [#12](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/12) tracks
 separate FenixSystem memory growth. See the
 [current findings and focused diagnostics](docs/display-startup.md).

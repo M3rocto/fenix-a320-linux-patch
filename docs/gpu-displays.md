@@ -78,6 +78,21 @@ overlay. Both keep the original restore point and preserve the other settings.
 
 ## Validation and limits
 
+### NVIDIA Display Safe Mode
+
+For the [#7 Fenix 3.0.0.7454 / CachyOS 11 / NVIDIA-PRIME report](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/7#issuecomment-6368573752),
+turn **USE DISPLAY SAFE MODE off** in the Fenix application before comparing
+GPU displays. The reporter records `ST D2D: False`, two D3D11 device creations,
+zero failures and working GPU displays. With Safe Mode on, thirteen devices
+were requested and most failed under simulator load. CPU rendering remains
+an available fallback. The patch does not force this user preference.
+
+This result does not establish physical RAM/VRAM exhaustion, a driver-wide
+concurrency defect or compatibility across all NVIDIA systems. The historical
+diagnostic sequence remains in [startup notes](display-startup.md).
+
+### Sharing controls
+
 The Xodus path was checked with Fenix 2.4.0.4720, MSFS 2024 1.8.16.0 and an
 AMD RX 6900 XT under Xwayland. PFD, ND and ECAM rendered in the live cockpit.
 A controlled SimConnect airspeed sweep exercised the moving PFD tape from

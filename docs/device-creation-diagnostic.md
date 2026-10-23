@@ -8,11 +8,12 @@ passes on the affected NVIDIA GPU in both serial and parallel modes.
 This narrows the conditions for a reproducer; load dependence and the
 application's extra graphics work still need to be separated.
 
-The [latest reply](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/7#issuecomment-6367117808)
-reports working displays after selecting **CPU rendering**. The loaded GPU
-comparison below is now optional. It is not required to continue using CPU
-displays or investigate the separate Gateway failure. The final Display Safe
-Mode state was not specified in that reply.
+The [latest reply](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/7#issuecomment-6368573752)
+reports working **GPU displays with "USE DISPLAY SAFE MODE" turned off**:
+two device creations and zero failures. CPU rendering was an earlier working
+fallback. The loaded GPU comparison below is optional historical guidance;
+no further probe run is requested for #7. The separate Gateway loader-name
+fix is documented [here](gateway-loader-case.md).
 
 The own-code `display-device-probe.exe` separates serial from parallel device
 creation. Both modes retain all successful devices until the entire batch has
@@ -107,7 +108,7 @@ changes to the production Fenix/MSFS launch defaults.
 
 ## Next comparison: stationary cockpit loaded
 
-Optional GPU investigation following the reported CPU workaround; no new
+Optional GPU investigation following the reported Safe Mode-off workaround; no new
 flight or repeat of the working configuration is requested.
 
 The closed-simulator control has already passed on the affected machine.

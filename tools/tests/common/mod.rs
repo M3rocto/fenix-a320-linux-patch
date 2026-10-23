@@ -148,6 +148,14 @@ case "$1" in
         elif [ "$program" = Fenix.exe ]; then
             printf 'loaded KERNEL32.DLL\r\n'
             [ -n "$FAKE_LOADER_REGRESSION" ] || printf 'loaded KERNELBASE.dll\r\n'
+        elif [ "$program" = Fenix.GqlGateway.exe ] || [ "$program" = fenix.gqlgateway.exe ]; then
+            if [ -n "$FAKE_GATEWAY_LOWERCASE" ]; then
+                printf 'loaded kernel32.dll\r\nloaded kernelbase.dll\r\n'
+            else
+                printf 'loaded KERNEL32.DLL\r\nloaded KERNELBASE.dll\r\n'
+            fi
+        elif [ "$program" = LoaderCaseControl.exe ] || [ "$program" = Fenix.GqlGateway.exe.extra ]; then
+            printf 'loaded kernel32.dll\r\nloaded kernelbase.dll\r\n'
         else
             printf '%s says hello\r\n' "$program"
             printf '%s notes something\n' "$program" >&2

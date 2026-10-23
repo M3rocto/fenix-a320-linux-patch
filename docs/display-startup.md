@@ -6,11 +6,25 @@ reports GPU Display and Gateway failures with Fenix 3.0.0.7454, preview.10, Stea
 System connection and CDU work in the reported later sessions. Earlier path
 and PBKDF2 errors in the same attachments belong to older sessions.
 
-The [latest reporter follow-up](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/7#issuecomment-6367117808)
-confirms that **CPU rendering restores the displays**. Gateway remains
-unresolved. The comment mentions Display Safe Mode having been enabled but
-does not specify its final on/off state; that setting is not inferred here.
-CPU mode is a reported workaround, not a correction to GPU initialization.
+## Resolved reporter startup: Gateway allowlist and Display Safe Mode
+
+The [latest follow-up](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/7#issuecomment-6368573752)
+and [PR #15](https://github.com/marselnenaj/fenix-a320-linux-patch/pull/15)
+identify the missing `Fenix.GqlGateway.exe` loader-name allowlist entry.
+**Preview.11 rebuilds PE NTDLL for all four runners** with that exact addition.
+The reporter confirms Gateway logging, port 8083 and a working EFB after the
+fix. Independent own-code baseline/candidate controls pass all 64 process-name
+comparisons; see [scope and verification](gateway-loader-case.md).
+
+The same follow-up clarifies the graphics setting: **turning off Fenix's
+"USE DISPLAY SAFE MODE" restores GPU displays** on the affected NVIDIA setup.
+The reporter records `ST D2D: False`, two D3D11 devices and zero failures,
+versus `ST D2D: True`, thirteen devices and the failures below. The earlier CPU
+workaround also worked, but CPU mode is no longer required in this report.
+This is a reported application-setting workaround, not a new graphics patch
+or a guarantee for all NVIDIA systems. The historical comparisons below used
+the failing configuration and remain useful evidence, rather than current
+instructions to repeat those tests.
 
 ## Synchronization configuration
 
@@ -19,11 +33,11 @@ synchronization. Disabling esync and fsync alone does not disable ntsync.
 The exact Wine 11 sources used by Xodus, Experimental 11 and CachyOS 11
 read `PROTON_NO_NTSYNC`; CachyOS 10 reads `WINE_DISABLE_FAST_SYNC`.
 
-The 0.1.0 source candidate sets the appropriate switches in the standalone
+Preview.11 sets the appropriate switches in the standalone
 installer and legacy Flightdeck launch script. Upgrading a Steam tool adds
 the switches while retaining its other Python settings. The corresponding
 [Flightdeck 0.2.19 source change](https://github.com/marselnenaj/flightdeck-msfs-2024-linux-xbox/pull/6)
-is also on main; public Flightdeck remains 0.2.18. These changes make the
+is also on main. These changes make the
 configuration consistent with the tested backend; they are **not a confirmed
 fix** for the reporter's Display or Gateway failure.
 
@@ -68,6 +82,9 @@ the application explicitly requests 11.1. Microsoft documents the
 [device-creation contract](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-d3d11createdevice).
 
 ### NVIDIA follow-up: all three binding models fail in Display
+
+Historical Safe Mode results; the later Safe Mode-off workaround above
+restores GPU displays on this reporter's setup.
 
 The latest attachments confirm these results on NVIDIA driver 615.78.8:
 
@@ -126,9 +143,8 @@ state constant: **one probe device first**, then thirteen serial devices if
 that passes, and thirteen parallel devices only if the serial batch passes.
 Stop after a failed smaller/serial case and preserve its first error. See the
 [exact comparison and launch notes](device-creation-diagnostic.md#next-comparison-stationary-cockpit-loaded).
-The reporter's CPU workaround makes this comparison optional; no further GPU
-test is required to keep the restored displays working or continue the Gateway
-investigation. Graphics defaults remain unchanged pending a reproducer.
+The reported Safe Mode-off GPU workaround makes this comparison optional;
+no further GPU test is requested for #7. Graphics defaults remain unchanged.
 
 ### Own-code graphics diagnostic
 
@@ -155,7 +171,10 @@ output pointer. **Exit 0 means at least one 11.1 device was created**; inspect
 every stage. The optional mutex query can fail even when device creation
 succeeds. The probe does not test cross-process transport or a complete cockpit.
 
-## Gateway: class initialization remains unresolved
+## Gateway: historical class-initialization samples
+
+These samples preceded the loader-name finding above. They identify a route,
+but were not sufficient to locate its busy loop or establish a lock defect.
 
 The supplied native stack is structurally consistent with CoreCLR class
 initialization entering deadlock-aware lock handling; its other normal thread
@@ -223,8 +242,10 @@ In particular, interpreting **RDI as a Crst** in the first sample would be
 wrong: the instruction that changes it has not executed. A one-off lock-owner
 read at the supplied pre-acquisition/cleanup sites would not distinguish the
 cause. No further generic runtime flags, repeated stack request or lock-memory
-read follows from these samples. A targeted next step needs the actual
-repeating call/initializer or a smaller reproducer.
+read follows from these samples. The later loader-name reproducer supplies
+the discriminator that these snapshots lacked.
 
 Keep Gateway write-copy tracking at its published default; the extra override
-did not help. No Gateway fix or full v3 stability claim follows from these results.
+did not help. These earlier controls alone do not establish a Gateway fix;
+the Preview.11 correction is supported separately above. Full v3 flight
+stability remains unqualified.

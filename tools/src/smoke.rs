@@ -490,6 +490,30 @@ impl Stage<'_, '_> {
             {
                 return Err(value("Loader spelling regression"));
             }
+            if name == "loader-case-probe" {
+                for (label, executable, upper) in [
+                    ("loader-case-gateway", "Fenix.GqlGateway.exe", true),
+                    ("loader-case-gateway-lower", "fenix.gqlgateway.exe", true),
+                    ("loader-case-unrelated", "LoaderCaseControl.exe", false),
+                    ("loader-case-suffix", "Fenix.GqlGateway.exe.extra", false),
+                ] {
+                    let target = work.join(executable);
+                    fsx::copy2(&output, &target)?;
+                    let text = self.logged(label, &argv![&target], env)?;
+                    ctx.print(&format!("{label}:\n{text}"))?;
+                    let names = if upper {
+                        ["KERNEL32.DLL", "KERNELBASE.dll"]
+                    } else {
+                        ["kernel32.dll", "kernelbase.dll"]
+                    };
+                    if !names.iter().all(|name| {
+                        text.lines()
+                            .any(|line| line.split_whitespace().last() == Some(*name))
+                    }) {
+                        return Err(value(&format!("Loader spelling regression: {label}")));
+                    }
+                }
+            }
         }
         let probe = work.join("FenixDisplay.exe");
         self.host(

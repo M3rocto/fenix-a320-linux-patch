@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "version": "0.1.0",
+  "version": "0.1.0-preview.11",
   "repository": "https://github.com/marselnenaj/fenix-a320-linux-patch",
   "wine_revision": "b1dd32734a34472a28eb5be9922df06e07ac0834",
   "xgameruntime_revision": "64aebcabb8c66121eae25d3bf0ace4b582ebb0da",
@@ -33,7 +33,7 @@
     "files/lib/wine/x86_64-windows/wintrust.dll": "e545e495dc731123fc6442c2867aae3df5898752f356d1e62efcee4a3c5a4720"
   },
   "files": {
-    "files/lib/wine/x86_64-windows/ntdll.dll": "2c6229a0917ee6cc944a12fa9b4eaa9e4db7997fb79b591474a16d789ef7e4b8",
+    "files/lib/wine/x86_64-windows/ntdll.dll": "cd03f6f93fcfcee2e2d1c18daebf2d7abe530c0da0f73490e7ca6950e59deef0",
     "files/lib/wine/x86_64-unix/ntdll.so": "93c78b998321b4af09d69423a46b54e57dabc2c181789a50ffc13fa649eabec8",
     "files/bin/wineserver": "ebd8f0861798d5634a3c13b492ada8eb1a6d74d2d3bd600087c0eaaafece02a9",
     "files/lib/wine/x86_64-windows/crypt32.dll": "d7af8990662b2c69b2b0eb8ffeaf32d52e2bf940958708b5accaca0816c17bf5",
@@ -557,7 +557,7 @@
         "files/lib/wine/x86_64-windows/wintrust.dll": "a71b1a09568cf60a9d2066956c40e192986b301ee16f51eac3713ec2c170bc3e"
       },
       "files": {
-        "files/lib/wine/x86_64-windows/ntdll.dll": "de0433829976205c13af4f2ade8946c0cd97d52511f0fa66f7f1859db1a3c739",
+        "files/lib/wine/x86_64-windows/ntdll.dll": "a6ef266baaa50f76bc7b02dc9b2f249a0c5853981a007b2c4c03f342bedcd27e",
         "files/lib/wine/x86_64-unix/ntdll.so": "59fa7c425bc3c6bf10183ae65ee36576768a8e31aa0ed8819331051fd4fc7342",
         "files/bin/wineserver": "8aa13e1e88ef05206763be1068da6c69d64b54f7cb79b069271d7d56bee6fa20",
         "files/lib/wine/x86_64-windows/crypt32.dll": "9dd0bcad57f32856f6f8c9a3011618bffe65f96f5eeea3078ffe70058bc96c5c",
@@ -898,7 +898,7 @@
         "files/lib/wine/x86_64-windows/wintrust.dll": "5d22b09be7119f7175e77672c0fd8673993d2621adc7ff7db3663e2c3500032d"
       },
       "files": {
-        "files/lib/wine/x86_64-windows/ntdll.dll": "38e969159c275d3c518606f22f337e8ead4ff60d0ffbcd52c65c13bdb3b969d8",
+        "files/lib/wine/x86_64-windows/ntdll.dll": "ebda347273090f849733829dd53e924f5cdbf1cfa91fc5840dadacac6300bbcf",
         "files/lib/wine/x86_64-unix/ntdll.so": "f5a0c4eb1ab7c593e3eb7c0bf539e225f2f78885974ca143483b5a1b9ccc73f7",
         "files/bin/wineserver": "91b83aaf2a740033a0d9ceafb45346938e9095424c9944807a90ee1f31fc59cc",
         "files/lib/wine/x86_64-windows/crypt32.dll": "b900c1e4e3325b28f280d7f5a5e5668abdd6b69ed59e5715dac6876076222c91",
@@ -1199,7 +1199,7 @@
         "files/lib/wine/x86_64-windows/wintrust.dll": "f10a47ade0f6c7cfc3d5f368efe0e1975c0ea243d54f4a89a3949d97603ce085"
       },
       "files": {
-        "files/lib/wine/x86_64-windows/ntdll.dll": "4423d54d2ed0c81d421366e7c4378250bae9b3e6f2d8ffea1265e21c202bad4f",
+        "files/lib/wine/x86_64-windows/ntdll.dll": "a57c2492602f583b66263ed7829f59df058626bf85bcd7a5c83877254ff7a63f",
         "files/lib/wine/x86_64-unix/ntdll.so": "9eaa6daaecc497c8b0eec514e28a88d6430ebf1dcb988ec6adccb71cdefcd793",
         "files/bin/wineserver": "aaaa4cebf17c2fef58fcbf2c759659109d48d40b3cc5a1279100acded23094cb",
         "files/lib/wine/x86_64-windows/crypt32.dll": "a40827bf153753b7c1e51279e62d6c07de119d4afe17bf8f31bac76f9c098d7b",
