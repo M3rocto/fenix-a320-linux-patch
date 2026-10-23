@@ -1553,7 +1553,7 @@
  
 --- a/dlls/ntdll/loader.c
 +++ b/dlls/ntdll/loader.c
-@@ -1663,6 +1663,21 @@
+@@ -1663,6 +1663,22 @@
      }
      if ((p = wcsrchr( buffer, '\\' ))) p++;
      else p = buffer;
@@ -1566,7 +1566,8 @@
 +        if (exe && (!wcsicmp( exe + 1, L"Fenix.exe" ) ||
 +                    !wcsicmp( exe + 1, L"FenixSystem.exe" ) ||
 +                    !wcsicmp( exe + 1, L"FenixDisplay.exe" ) ||
-+                    !wcsicmp( exe + 1, L"FenixCDU.exe" )))
++                    !wcsicmp( exe + 1, L"FenixCDU.exe" ) ||
++                    !wcsicmp( exe + 1, L"Fenix.GqlGateway.exe" )))
 +        {
 +            if (!wcsicmp( p, L"kernel32.dll" )) memcpy( (WCHAR *)p, L"KERNEL32.DLL", sizeof(L"KERNEL32.DLL") );
 +            if (!wcsicmp( p, L"kernelbase.dll" )) memcpy( (WCHAR *)p, L"KERNELBASE.dll", sizeof(L"KERNELBASE.dll") );

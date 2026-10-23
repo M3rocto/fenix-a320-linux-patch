@@ -55,7 +55,7 @@
     "files/lib/wine/x86_64-windows/wintrust.dll": "6de74ee506499e1ebe3d2c5c8372011ed4c07974c78647082d56dcef422c5d92"
   },
   "patches": {
-    "fenix-loader-case.patch": "0fcf4be0c989566688d1ed334701cc3461c8609f8101d6f20552634b69f7ad1c",
+    "fenix-loader-case.patch": "72d1b77408708a45f258b253a278bed668614ab09e00f1e4f6a457b1cec3d2e3",
     "wine-writecopy-tracking.patch": "54eadebd1584d70a2d4853ca999bf105297b6d53db2358547c3826c565d85ad9",
     "wine-mapped-image-name.patch": "3baafbd727568cd45c3eb38c61342d654636804c2d01da0612b515afcfacfd8f",
     "wine-rfc3161-content.patch": "9352d5a8145b8c41ef587427a8684ec76ad3f6b69434ef52cc7eec7dbf762084",
@@ -579,7 +579,7 @@
         "files/lib/wine/x86_64-windows/wintrust.dll": "ff882b740b25bfae35856c4b2092fe9d2f5200b31ec5b87af4c3d63201000685"
       },
       "patches": {
-        "proton/experimental-11.patch": "b83c1b4f2559ac602370fbb87e6e0fa2c51a93a7657c14f5b057fab0aff6dcb6",
+        "proton/experimental-11.patch": "228d5a67d8704b8dbd14d374b4dd0a8a437c371ffd750fa443deb08aee610844",
         "proton/experimental-11-shared-resource-adapter.patch": "33a4268c4a9559c73e8a26b9e55810b1880b20ce3daae5c02e7ec3a945d0111d",
         "proton/wine-shared-fence-context.patch": "0f83d658403845ae56db0107695dc21172bf1d3cc891d0c3d682642cc595c812",
         "wine-d2d1-free-vertex-types.patch": "69854caf8cac3a01e49d0d7ee92a46213bc169423821223e6b7fbf4f9aa3a184",
@@ -916,7 +916,7 @@
         "files/lib/wine/x86_64-windows/wintrust.dll": "07228a51d01e20cb126241655474402d73ea2c38ae537a028e102cab4becb9bf"
       },
       "patches": {
-        "proton/cachyos-10.patch": "8ddf687850a02d69ede0398f3554fcfab4128af79a7b1c783443a4cf98b68fe4",
+        "proton/cachyos-10.patch": "8200f3fac28136905ec9e71d2e60f611acfef3a51485ede8670fd806148162bb",
         "wine-d2d1-free-vertex-types.patch": "69854caf8cac3a01e49d0d7ee92a46213bc169423821223e6b7fbf4f9aa3a184",
         "wine-d2d1-bezier-split-limit.patch": "6a5207d4a79df3e94638598a162cc3c7a9a76abf70b0fb7d6d64f82332524cf8",
         "wine-d2d1-triangulation-cycle.patch": "79abb112cfa9ad5caf7656ec64f38f1b7e08e3db219a8957b5c8b2b5bdd4f420",
@@ -1221,7 +1221,7 @@
         "files/lib/wine/x86_64-windows/wintrust.dll": "99134ff02e50dd24e833d65e071eb2d0ec4c38c63e7e6a1ab4f92f3fd74b0436"
       },
       "patches": {
-        "proton/cachyos-11.patch": "0992d4c491f37f041490743612b81dd5b2f79ddd618c5c57f91dc03e518373e2",
+        "proton/cachyos-11.patch": "047d027cdb6f0bdec7f86d26ff17906b5de144359d938ec1fcf0bf54bad16b9c",
         "proton/cachyos-11-shared-resource-adapter.patch": "4f929e8cec81d54d68d43093511eca12b7b35135a8ebe9382aa1b9ee937b9024",
         "proton/wine-shared-fence-context.patch": "0f83d658403845ae56db0107695dc21172bf1d3cc891d0c3d682642cc595c812",
         "wine-d2d1-free-vertex-types.patch": "69854caf8cac3a01e49d0d7ee92a46213bc169423821223e6b7fbf4f9aa3a184",
