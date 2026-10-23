@@ -97,13 +97,9 @@ jobs:
           mkdir -p build/graphics-diagnostics/source
           x86_64-w64-mingw32-g++-win32 -std=c++17 -O2 -Wall -Wextra -Werror \
             -fno-exceptions -fno-rtti -static-libgcc -static-libstdc++ \
-            tests/display-initialization-probe.cpp -o build/graphics-diagnostics/display-initialization-probe.exe \
-            -ld3d11 -ldxgi -ld2d1 -lole32 -luuid
-          x86_64-w64-mingw32-g++-win32 -std=c++17 -O2 -Wall -Wextra -Werror \
-            -fno-exceptions -fno-rtti -static-libgcc -static-libstdc++ \
             tests/display-device-probe.cpp -o build/graphics-diagnostics/display-device-probe.exe \
             -ld3d11 -ldxgi -lole32 -luuid
-          cp tests/display-initialization-probe.cpp tests/display-device-probe.cpp build/graphics-diagnostics/source/
+          cp tests/display-device-probe.cpp build/graphics-diagnostics/source/
           cp LICENSE build/graphics-diagnostics/LICENSE
           cp docs/device-creation-diagnostic.md build/graphics-diagnostics/README.md
           printf 'Source commit: %s\n' "$GITHUB_SHA" > build/graphics-diagnostics/BUILD-INFO.txt

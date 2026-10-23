@@ -26,7 +26,7 @@ do not reproduce the affected NVIDIA system.
 
 The **graphics-diagnostics** job in the repository's
 [Actions runs](https://github.com/marselnenaj/fenix-a320-linux-patch/actions)
-publishes `fenix-graphics-diagnostics`: both own graphics probes, their source,
+publishes `fenix-graphics-diagnostics`: the retained-device probe, its source,
 license, build/commit information and `SHA256SUMS`. Use the artifact from the
 linked issue response so the source and executable identities match.
 
