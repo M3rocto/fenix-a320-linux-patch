@@ -185,12 +185,31 @@ matching the locally inspected image. Register values precede the backtraces.
 | `+0x10f9bc` | Entry of the structurally matched `MethodTable::EnsureStaticDataAllocated`, called by the class-initialization wrapper. The sampled instruction is not one of the helper's retry loops. |
 | `+0x10f465` | Class-initialization entry-holder cleanup call, not a sampled wait or deadlock-graph traversal. |
 
-All three backtraces share the class-initialization helper return at
-`+0x12abd9`; their raw contexts are consistent with the same candidate
+All three backtraces share the return at `+0x12abd9` from **InitClassHelper**
+(entry `+0x12aba0`); their raw contexts are consistent with the same candidate
 MethodTable. This strengthens the class-initialization boundary, but does not
-identify the initialized type, its caller or a causal busy loop. Function
-names remain structural source matches rather than symbols from a matching
-product PDB.
+identify the initialized type, its caller or a causal busy loop. InitClassHelper
+is named by an actual native registration entry in the inspected image;
+the other function names remain structural source matches rather than symbols
+from a matching product PDB.
+
+The exact bundled `System.Private.CoreLib` also confirms the managed route:
+`InitHelpers.InitClassSlow` calls `QCall!InitClassHelper`; the lazy GC/non-GC
+static-base helpers and generic initialization can reach it. In contrast,
+`RuntimeHelpers.RunClassConstructor` imports
+`ReflectionInvocation_RunClassConstructor`. This distinction comes from the
+selected CoreLib's CIL/import metadata, not just a neighboring reference build.
+Its SHA-256 is **3440c3d45d1301dda4cb4f4058a7cb15ca26fc0d2f4d056b46e0d7dd3bb7cb61**,
+MVID **5bf3e5bc-4e65-415b-a722-c3448d57f321**, assembly version **10.0.0.0**,
+with CIL and R2R payloads. The public [InitHelpers source](https://github.com/dotnet/runtime/blob/6aa72daa24f66c01c3d7b6a32519e9d21396deec/src/coreclr/System.Private.CoreLib/src/System/Runtime/CompilerServices/InitHelpers.cs)
+is a reference for that route, not proof of exact native-build equivalence.
+
+An [original class-initialization control](../tests/coreclr-class-init/README.md)
+passed **3,607 checks** with public Windows .NET 10.0.13, the patched CachyOS 11
+runner and a fresh prefix. It includes direct lazy GC/non-GC and generic
+static-field access as well as two contending constructor calls. It uses
+invariant globalization and builtin mscoree for its own CIL launch. It does
+not test the custom Gateway runtime, protected type, R2R path or simulator load.
 
 In particular, interpreting **RDI as a Crst** in the first sample would be
 wrong: the instruction that changes it has not executed. A one-off lock-owner
