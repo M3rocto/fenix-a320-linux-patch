@@ -79,21 +79,27 @@ jobs:
       - run: python3 -m unittest tests/test_display_refresh.py -v
   graphics-diagnostics:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - name: Install the diagnostic cross-compiler
-        run: sudo apt-get update && sudo apt-get install -y g++-mingw-w64-x86-64
+        # The runner's HTTP mirror downloaded compiler packages at about
+        # 64 KiB/s. Use Ubuntu's HTTPS archive and only the Win32 flavor;
+        # the probes use CreateThread directly and need no POSIX threading.
+        run: |
+          printf '%s\n' 'https://archive.ubuntu.com/ubuntu' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::https::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::https::Timeout=30 install -y --no-install-recommends g++-mingw-w64-x86-64-win32
       - name: Build the own-code diagnostics and record provenance
         run: |
           mkdir -p build/graphics-diagnostics/source
-          x86_64-w64-mingw32-g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+          x86_64-w64-mingw32-g++-win32 -std=c++17 -O2 -Wall -Wextra -Werror \
             -fno-exceptions -fno-rtti -static-libgcc -static-libstdc++ \
             tests/display-initialization-probe.cpp -o build/graphics-diagnostics/display-initialization-probe.exe \
             -ld3d11 -ldxgi -ld2d1 -lole32 -luuid
-          x86_64-w64-mingw32-g++ -std=c++17 -O2 -Wall -Wextra -Werror \
+          x86_64-w64-mingw32-g++-win32 -std=c++17 -O2 -Wall -Wextra -Werror \
             -fno-exceptions -fno-rtti -static-libgcc -static-libstdc++ \
             tests/display-device-probe.cpp -o build/graphics-diagnostics/display-device-probe.exe \
             -ld3d11 -ldxgi -lole32 -luuid
@@ -101,7 +107,7 @@ jobs:
           cp LICENSE build/graphics-diagnostics/LICENSE
           cp docs/device-creation-diagnostic.md build/graphics-diagnostics/README.md
           printf 'Source commit: %s\n' "$GITHUB_SHA" > build/graphics-diagnostics/BUILD-INFO.txt
-          x86_64-w64-mingw32-g++ --version >> build/graphics-diagnostics/BUILD-INFO.txt
+          x86_64-w64-mingw32-g++-win32 --version >> build/graphics-diagnostics/BUILD-INFO.txt
           cd build/graphics-diagnostics
           sha256sum *.exe source/*.cpp LICENSE README.md BUILD-INFO.txt > SHA256SUMS
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
