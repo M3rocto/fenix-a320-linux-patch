@@ -1,8 +1,63 @@
+# 0.1.0 — in preparation, not published
+
+* Explicitly select server synchronization for Fenix: `PROTON_NO_NTSYNC=1`
+  for pinned Wine 11 and `WINE_DISABLE_FAST_SYNC=1` for CachyOS 10. Steam
+  updates retain other Python settings while adding these switches; the
+  standalone application's environment and legacy launch script agree.
+  This corrects a configuration mismatch, not a confirmed cause/fix of the
+  NVIDIA Display crash or Gateway spin in #7.
+* Retain exact preview.10 snapshots for upgrades; native overlay modules
+  and runner pins are unchanged.
+* Rewrite English/German READMEs around setup, evidence, restore and
+  troubleshooting. Add an own-code graphics-initialization diagnostic and
+  document the remaining #7/#12 work.
+
+See [release readiness](release-readiness.md) and the
+[Display/Gateway investigation](display-startup.md). The published download
+remains preview.10; this section does not announce a regular release.
+
+# 0.1.0-preview.10 — experimental, 23 October 2026
+
+This test release reaches user-confirmed cockpit displays with Fenix
+**3.0.0.7454**, official Installer **1.0.359**, MSFS 2024 **1.8.16.0** and
+Xodus **11.0 / 7c0b4354**. **Known issue:** one startup hit Wine's
+`create_view` assertion after System boot. A later fresh production run and
+five warm backend restarts did not reproduce it; its cause remains unknown.
+No full flight or MSFS 2020/GE regression check has been completed.
+See [the test sequence and limits](fenix-v3.md).
+
+* Return the native no-package error from WinRT `ApplicationData.Current`
+  for ordinary desktop processes. The new installer's existing SQLite
+  fallback then works, and the official aircraft installation completes.
+* Implement a bounded SHA1/SHA256 PE indirect-data route for
+  `CryptSIPCreateIndirectData`, replacing the startup stub. Complete native
+  SIP representation and certificate trust conformance are not established.
+* Reopen `GLOBALROOT` aliases through their actual volume mapping, preserve
+  separator counts, and store a rooted current directory. This clears the
+  brief invalid-name failure and later engine/content-root lookup failures.
+* Map the missing PBKDF2 pseudo-handle to Wine's existing implementation.
+* Support unnamed ephemeral NCrypt `ECDH_P256` keys with scoped BCrypt
+  parameter validation, provider lifetime and HASH/raw derivation handling.
+  Other curves, named keys and the full CNG API remain outside this change.
+* Include matching builds and independent native controls for all four
+  pinned runners. Real v3 cockpit checks cover Xodus only. Verified preview.9
+  installations can update without reinstalling the aircraft or resetting
+  renderer preferences and the original restore point.
+
+The vendor executables and their authentication remain unchanged. Diagnostic
+memory logging, APC and KernelBase experiments are excluded from the payload.
+The issue and draft PR remain open for stability investigation. Flightdeck's
+separate patch pin was subsequently updated in Flightdeck **0.2.18**. A later
+Steam/MSFS 2020 NVIDIA report confirms installation/login/System but still
+fails Display and Gateway startup; see [the follow-up](display-startup.md).
+
 # 0.1.0-preview.9 — 22 October 2026
 
 * All four overlays free Direct2D figure vertex types, backporting Wine
   `4ae80e26e5` from M3rocto's PR #10. This fixes the per-geometry leak
-  reported in issue #8; long-flight process memory behaviour remains unvalidated.
+  reported in issue #8. A later community 1 h 53 min v2 flight reported stable
+  Display memory and no frozen displays. Its separate System RSS growth
+  remains open in [#12](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/12).
 * Nearly coincident Bézier control triangles have a subdivision limit;
   non-finite areas and invalid line-intersection parameters are rejected.
   The new stress test also found two cyclic triangulation walks, which now
@@ -12,8 +67,8 @@
   [geometry lifetime and termination](d2d-lifetime.md)
   for the reproducible checks and the absolute path-unit tolerance.
 * The standalone installer prepares the pinned Microsoft .NET 10.0.13 x64
-  Desktop Runtime, required by the Fenix v3 installer (issue #7), alongside
-  .NET Framework 4.8. The runtime is also prepared when updating an existing
+  Desktop Runtime for Fenix builds reporting that missing prerequisite
+  (issue #7), alongside .NET Framework 4.8. The runtime is also prepared when updating an existing
   Steam installation and checked before opening an official Fenix application;
   an incomplete installation prevents that launch. Downloads are checksum-verified and not included
   in the release. Runtime installation, host discovery and an own-code WPF

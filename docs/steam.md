@@ -86,7 +86,10 @@ compatibility fixes and the remaining validation limits.
   second copy of the simulator content is needed. Restore moves it back.
 * `compatibilitytools.d/Proton-Fenix-A320-<variant>` holds the Proton copy with
   the overlay and a `user_settings.py` with the Fenix environment. Like
-  Flightdeck, it runs the simulator without esync/fsync.
+  Flightdeck, it runs the simulator without esync/fsync. The 0.1.0 source
+  candidate also explicitly disables ntsync using each pinned Wine
+  generation's switch; existing tools receive it during an update. Published
+  preview.10 needs the manual comparison in [v3 startup diagnostics](display-startup.md).
 * `select` changes one entry in Steam's `config/config.vdf`: the compatibility
   tool of this simulator. It refuses while Steam runs, keeps a copy of the file
   next to the patch state and rejects a file it does not fully understand.
@@ -102,8 +105,9 @@ another Proton for the simulator in Steam afterwards.
 * The installation has to run inside a desktop session. Without a display,
   Microsoft's .NET setup does not finish under Wine 11; the installer refuses
   to start instead.
-* Without the kernel's `ntsync` device, Wine 11 uses server-side
-  synchronization. The overlay's checks ran in that mode only.
+* The overlay's checks ran with server synchronization. The 0.1.0 source
+  candidate explicitly selects it even when `/dev/ntsync` exists. Behavior
+  with an active ntsync backend has not been validated here.
 
 * The automatic MCDU refresh after a display restart is started by Flightdeck's
   launcher and is not part of the Steam path. The fallback window guard for the
