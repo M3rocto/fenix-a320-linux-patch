@@ -99,7 +99,7 @@ complete simulator and GPU-driver compatibility requires runtime testing.
 | Fenix | Tested setup | Observed behavior |
 | --- | --- | --- |
 | 2.4.0.4720 | MSFS 2024 1.8.16.0 · Xodus 11.0 | PFD, ND, ECAM, MCDU and cockpit readouts checked locally. |
-| 2.4.0.4720 | MSFS 2024 · CachyOS 11 | Community-reported 1 h 53 min flight with stable Display memory and no frozen displays. System memory growth remains open. |
+| 2.4.0.4720 | MSFS 2024 · CachyOS 11 | Community flight report with stable Display memory and no frozen displays; the supplied trace spans nearly two hours. Separate System growth is confirmed in the supplied counters; its cause remains open. |
 | 3.0.0.7454 | MSFS 2024 1.8.16.0 · Xodus 11.0 | Official Installer 1.0.359, login, System connection and working cockpit displays checked; six bounded production starts passed. |
 | 3.0.0.7454 | Steam MSFS 2020 · CachyOS 11 · NVIDIA/PRIME | Installation, login, System and CDU work according to the report; Display initialization and Gateway startup still fail. |
 
