@@ -31,10 +31,11 @@ use std::{
 pub const MARKER: &str = "private/fenix-linux-patch.json";
 pub const PROGRAM: &str = "drive_c/Program Files/FenixSim A320";
 pub const CONFIG: &str = "drive_c/ProgramData/Fenix/FenixSim A320";
-pub const ENV: [(&str, &str); 10] = [
+pub const ENV: [(&str, &str); 11] = [
     ("WINEARCH", "win64"),
     ("WINEESYNC", "0"),
     ("WINEFSYNC", "0"),
+    ("PROTON_NO_NTSYNC", "1"),
     (
         "WINE_TRACK_WRITECOPY",
         "apps:Fenix.exe,FenixSystem.exe,FenixDisplay.exe,FenixCDU.exe,FlightSimulator2024.exe",

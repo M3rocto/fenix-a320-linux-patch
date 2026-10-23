@@ -1,0 +1,61 @@
+Subject: [PATCH] ntdll: Resolve GLOBALROOT devices and preserve root separators.
+
+Resolve GLOBALROOT device names through the existing live NT-to-DOS mapping.
+Match complete device identities and preserve the device suffix separator count
+when constructing the replacement DOS path. SystemRoot conversion is unchanged.
+
+--- a/dlls/ntdll/unix/file.c
++++ b/dlls/ntdll/unix/file.c
+@@ -4062,7 +4062,7 @@
+     while (!NtQueryDirectoryObject( handle, info, sizeof(data), TRUE, FALSE, &ctx, NULL ))
+     {
+         if (read_nt_symlink( handle, &info->ObjectName, symlinkW, MAX_DIR_ENTRY_LEN )) continue;
+-        if (wcsnicmp( symlinkW, name, length )) continue;
++        if (wcslen( symlinkW ) != length || wcsnicmp( symlinkW, name, length )) continue;
+         if (info->ObjectName.Length != 2 * sizeof(WCHAR) || info->ObjectName.Buffer[1] != ':') continue;
+ 
+         *device_ret = info->ObjectName.Buffer[0];
+@@ -4089,21 +4089,35 @@
+     static const WCHAR systemrootW[] = {'\\','S','y','s','t','e','m','R','o','o','t','\\',0};
+     static const WCHAR dosprefixW[] = {'\\','?','?','\\'};
+     static const WCHAR deviceW[] = {'\\','D','e','v','i','c','e','\\',0};
++    static const WCHAR globalrootW[] = {'\\','?','?','\\','G','L','O','B','A','L','R','O','O','T',0};
+     WCHAR *name, *ptr, *prefix, buffer[3] = {'c',':',0};
++    WCHAR *device_name;
+     UNICODE_STRING *nameW;
+-    size_t offset, name_len;
++    size_t offset, name_len, device_len;
+     NTSTATUS status;
+ 
+     if (attr->RootDirectory) return nt_to_unix_file_name_internal( attr, nt_name, name_ret, disposition, open_reparse );
+ 
+     nameW = attr->ObjectName;
+-
+-    if (nameW->Length >= sizeof(deviceW) - sizeof(WCHAR)
+-        && !wcsnicmp( nameW->Buffer, deviceW, ARRAY_SIZE(deviceW) - 1 ))
+-    {
+-        offset = sizeof(deviceW) / sizeof(WCHAR);
+-        while (offset * sizeof(WCHAR) < nameW->Length && nameW->Buffer[ offset ] != '\\') offset++;
+-        if ((status = nt_to_dos_device( nameW->Buffer, offset, buffer ))) return status;
++    device_name = nameW->Buffer;
++    device_len = nameW->Length / sizeof(WCHAR);
++    if (device_len > ARRAY_SIZE(globalrootW) - 1 &&
++        !wcsnicmp( device_name, globalrootW, ARRAY_SIZE(globalrootW) - 1 ) &&
++        device_name[ARRAY_SIZE(globalrootW) - 1] == '\\')
++    {
++        device_name += ARRAY_SIZE(globalrootW) - 1;
++        device_len -= ARRAY_SIZE(globalrootW) - 1;
++    }
++
++    if (device_len >= ARRAY_SIZE(deviceW) - 1 &&
++        !wcsnicmp( device_name, deviceW, ARRAY_SIZE(deviceW) - 1 ))
++    {
++        offset = ARRAY_SIZE(deviceW) - 1;
++        while (offset < device_len && device_name[offset] != '\\') offset++;
++        if ((status = nt_to_dos_device( device_name, offset, buffer ))) return status;
++        /* The replacement DOS prefix supplies the first root separator. */
++        if (offset < device_len) offset++;
++        offset += device_name - nameW->Buffer;
+         prefix = buffer;
+     }
+     else if (nameW->Length >= sizeof(systemrootW) - sizeof(WCHAR) &&

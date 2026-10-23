@@ -46,7 +46,7 @@ See [the test sequence and limits](fenix-v3.md).
 
 The vendor executables and their authentication remain unchanged. Diagnostic
 memory logging, APC and KernelBase experiments are excluded from the payload.
-The issue and draft PR remain open for stability investigation. Flightdeck's
+The issue remains open for stability investigation. Flightdeck's
 separate patch pin was subsequently updated in Flightdeck **0.2.18**. A later
 Steam/MSFS 2020 NVIDIA report confirms installation/login/System but still
 fails Display and Gateway startup; see [the follow-up](display-startup.md).

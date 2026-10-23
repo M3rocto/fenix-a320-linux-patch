@@ -85,7 +85,7 @@ fn stem() -> String {
 }
 
 /// The source files of the synthetic repository, as they are named in a release.
-const SOURCE: [&str; 43] = [
+const SOURCE: [&str; 52] = [
     ".github/workflows/ci.yml",
     ".gitignore",
     "BUILDING.md",
@@ -114,13 +114,22 @@ const SOURCE: [&str; 43] = [
     "sources/wine-source.tar.gz",
     "sources/x-wine.tar.gz",
     "sources/xgameruntime-source.tar.gz",
+    "tests/applicationdata-unpackaged-probe.c",
     "tests/audio-notification-probe.c",
+    "tests/cwd-contract-probe.c",
     "tests/iocp-smoke.c",
     "tests/loader-case-probe.c",
+    "tests/ncrypt-ecdh-probe.c",
+    "tests/ncrypt-ecdh-vectors.h",
     "tests/path-metrics-probe.cpp",
+    "tests/pbkdf2-probe.c",
     "tests/shared-cursor-probe.c",
+    "tests/sip-pe-fixture.h",
+    "tests/sip-pe-probe.c",
     "tests/stroke-joins-probe.cpp",
     "tests/test_display_refresh.py",
+    "tests/volume-roundtrip-probe.c",
+    "tests/volume-separators-probe.c",
     "tests/window-guard-probe.c",
     "tests/writecopy-probe.c",
     "tools/src/lib.rs",
@@ -832,8 +841,9 @@ fn every_linked_crate_must_ship_its_licence() {
             .iter()
             .map(|text| format!("licenses/rust/{}", text.name))
             .collect::<Vec<_>>(),
-        SOURCE[40..]
+        SOURCE
             .iter()
+            .filter(|name| name.starts_with("licenses/rust/") && !name.ends_with("/INVENTORY.json"))
             .chain(&NOTICES)
             .copied()
             .collect::<Vec<_>>()

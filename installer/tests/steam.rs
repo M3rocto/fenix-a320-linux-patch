@@ -317,6 +317,10 @@ fn install_creates_separate_tool_and_restore_returns_everything() {
             .contains("FlightSimulator.exe")
     );
     assert_eq!(settings["WINE_D2D1_GEOMETRY_PROVIDER"], "FenixDisplay.exe");
+    assert_eq!(settings["WINE_DISABLE_FAST_SYNC"], "1");
+    assert_eq!(settings["PROTON_NO_NTSYNC"], "1");
+    assert_eq!(settings["PROTON_NO_ESYNC"], "1");
+    assert_eq!(settings["PROTON_NO_FSYNC"], "1");
     assert_eq!(
         read(&fx.prefix.join("drive_c/windows/system32/ntdll.dll")),
         "new files/lib/wine/x86_64-windows/ntdll.dll"
@@ -736,6 +740,10 @@ fn restore_returns_a_previously_forced_tool() {
 fn update_replaces_the_overlay_and_keeps_the_profile() {
     let fx = Fixture::new();
     fx.install(&fx.item).unwrap();
+    // Older tools lack the fast-sync flag. Preserve even custom Python syntax
+    // and unrelated choices while the update adds the supported sync policy.
+    let prior_settings = "user_settings = {'PROTON_NO_ESYNC': '1', 'PROTON_NO_FSYNC': '1'}\nuser_settings['DXVK_HUD'] = 'fps'\n";
+    put(&fx.tool().join("user_settings.py"), prior_settings);
     put(&fx.prefix.join(core::PROGRAM).join("Fenix.exe"), "MZ");
     put(
         &fx.prefix.join(core::CONFIG).join("fenixConfig.xml"),
@@ -790,6 +798,10 @@ fn update_replaces_the_overlay_and_keeps_the_profile() {
     )
     .unwrap();
     assert!(messages.last().contains("Patch updated"));
+    let settings = read(&fx.tool().join("user_settings.py"));
+    assert!(settings.starts_with(prior_settings));
+    assert!(settings.contains("user_settings[\"WINE_DISABLE_FAST_SYNC\"] = \"1\""));
+    assert!(settings.contains("user_settings[\"PROTON_NO_NTSYNC\"] = \"1\""));
     assert_eq!(
         read(&fx.tool().join("files/bin/wineserver")),
         "newer files/bin/wineserver"
@@ -886,6 +898,15 @@ fn update_of_a_shared_tool_reaches_both_simulators() {
     steam::verify_installed(fx.mock.as_ref(), &fx.item, &fx.state(&fx.item)).unwrap();
     steam::verify_installed(fx.mock.as_ref(), &other, &fx.state(&other)).unwrap();
     assert_eq!(fx.mock.setups.lock().unwrap().len(), 2);
+    let settings = read(&fx.tool().join("user_settings.py"));
+    for key in ["PROTON_NO_NTSYNC", "WINE_DISABLE_FAST_SYNC"] {
+        assert_eq!(
+            settings
+                .matches(&format!("user_settings[\"{key}\"]"))
+                .count(),
+            1
+        );
+    }
 }
 
 #[test]

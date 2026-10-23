@@ -1,0 +1,297 @@
+Subject: [PATCH] wintrust: Create bounded PE SHA1/SHA256 SIP indirect data.
+
+Keep one explicitly sized read-only mapping and a private PE metadata
+snapshot. Supported layouts use contiguous ordered raw sections, bounded
+PE headers, and an absent certificate table or one ending at EOF. Other
+layouts fail explicitly. Certificate trust decisions are unchanged.
+
+--- a/dlls/wintrust/crypt.c
++++ b/dlls/wintrust/crypt.c
+@@ -329,6 +329,149 @@
+ done:
+     UnmapViewOfFile( view );
+     CloseHandle( mapping );
++    return ret;
++}
++
++/* The SIP route uses the same PE digest ranges as pe_image_hash(), but bounds
++ * one retained mapping using a private metadata snapshot. A writable file must
++ * not be reparsed through unchecked headers after a separate preflight pass.
++ * This does not validate certificates or promise a stable concurrently edited
++ * image. Unsupported noncontiguous layouts fail explicitly. */
++static BOOL sip_pe_image_hash( HANDLE file, HCRYPTHASH hash )
++{
++    LARGE_INTEGER file_size;
++    HANDLE mapping;
++    const BYTE *view;
++    IMAGE_DOS_HEADER dos;
++    IMAGE_FILE_HEADER coff;
++    IMAGE_SECTION_HEADER *sections = NULL;
++    union
++    {
++        IMAGE_OPTIONAL_HEADER32 hdr32;
++        IMAGE_OPTIONAL_HEADER64 hdr64;
++    } optional;
++    SIZE_T size, nt_offset, optional_offset, section_offset, section_end, section_size;
++    SIZE_T checksum_offset, security_offset, hash_end;
++    DWORD signature, sig_pos, sig_size, headers, rva_count, directory_offset;
++    DWORD error = ERROR_BAD_FORMAT;
++    unsigned int i;
++    BOOL ret = FALSE;
++
++    if (!GetFileSizeEx( file, &file_size )) return FALSE;
++    if (file_size.QuadPart >= MAXDWORD)
++    {
++        SetLastError( ERROR_NOT_SUPPORTED );
++        return FALSE;
++    }
++    if (file_size.QuadPart < (LONGLONG)sizeof(dos))
++    {
++        SetLastError( ERROR_BAD_FORMAT );
++        return FALSE;
++    }
++    size = file_size.QuadPart;
++    if (!(mapping = CreateFileMappingW( file, NULL, PAGE_READONLY, 0, 0, NULL ))) return FALSE;
++    if (!(view = MapViewOfFile( mapping, FILE_MAP_READ, 0, 0, size )))
++    {
++        error = GetLastError();
++        goto done;
++    }
++    memcpy( &dos, view, sizeof(dos) );
++    if (dos.e_magic != IMAGE_DOS_SIGNATURE || dos.e_lfanew < (LONG)sizeof(dos)) goto done;
++    nt_offset = dos.e_lfanew;
++    if (nt_offset > size || size - nt_offset < sizeof(signature) + sizeof(coff)) goto done;
++    memcpy( &signature, view + nt_offset, sizeof(signature) );
++    if (signature != IMAGE_NT_SIGNATURE) goto done;
++    memcpy( &coff, view + nt_offset + sizeof(signature), sizeof(coff) );
++    optional_offset = nt_offset + sizeof(signature) + sizeof(coff);
++    if (coff.SizeOfOptionalHeader > size - optional_offset || coff.SizeOfOptionalHeader < sizeof(WORD)) goto done;
++    memset( &optional, 0, sizeof(optional) );
++    memcpy( &optional, view + optional_offset, min( sizeof(optional), coff.SizeOfOptionalHeader ) );
++    if (optional.hdr64.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC)
++    {
++        if (coff.SizeOfOptionalHeader < FIELD_OFFSET(IMAGE_OPTIONAL_HEADER64, DataDirectory[IMAGE_DIRECTORY_ENTRY_SECURITY + 1])) goto done;
++        rva_count = optional.hdr64.NumberOfRvaAndSizes;
++        directory_offset = FIELD_OFFSET(IMAGE_OPTIONAL_HEADER64, DataDirectory);
++        headers = optional.hdr64.SizeOfHeaders;
++        sig_pos = optional.hdr64.DataDirectory[IMAGE_DIRECTORY_ENTRY_SECURITY].VirtualAddress;
++        sig_size = optional.hdr64.DataDirectory[IMAGE_DIRECTORY_ENTRY_SECURITY].Size;
++        checksum_offset = optional_offset + FIELD_OFFSET(IMAGE_OPTIONAL_HEADER64, CheckSum);
++    }
++    else if (optional.hdr32.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC)
++    {
++        if (coff.SizeOfOptionalHeader < FIELD_OFFSET(IMAGE_OPTIONAL_HEADER32, DataDirectory[IMAGE_DIRECTORY_ENTRY_SECURITY + 1])) goto done;
++        rva_count = optional.hdr32.NumberOfRvaAndSizes;
++        directory_offset = FIELD_OFFSET(IMAGE_OPTIONAL_HEADER32, DataDirectory);
++        headers = optional.hdr32.SizeOfHeaders;
++        sig_pos = optional.hdr32.DataDirectory[IMAGE_DIRECTORY_ENTRY_SECURITY].VirtualAddress;
++        sig_size = optional.hdr32.DataDirectory[IMAGE_DIRECTORY_ENTRY_SECURITY].Size;
++        checksum_offset = optional_offset + FIELD_OFFSET(IMAGE_OPTIONAL_HEADER32, CheckSum);
++    }
++    else goto done;
++    if (rva_count <= IMAGE_DIRECTORY_ENTRY_SECURITY) goto done;
++    if (rva_count > (coff.SizeOfOptionalHeader - directory_offset) / sizeof(IMAGE_DATA_DIRECTORY)) goto done;
++    security_offset = optional_offset + directory_offset + IMAGE_DIRECTORY_ENTRY_SECURITY * sizeof(IMAGE_DATA_DIRECTORY);
++    section_offset = optional_offset + coff.SizeOfOptionalHeader;
++    if (coff.NumberOfSections > (size - section_offset) / sizeof(*sections)) goto done;
++    section_size = coff.NumberOfSections * sizeof(*sections);
++    if (headers < section_offset + section_size || headers > size) goto done;
++    if (section_size)
++    {
++        if (!(sections = malloc( section_size )))
++        {
++            error = ERROR_OUTOFMEMORY;
++            goto done;
++        }
++        memcpy( sections, view + section_offset, section_size );
++    }
++    section_end = headers;
++    for (i = 0; i < coff.NumberOfSections; i++)
++    {
++        if (!sections[i].SizeOfRawData) continue;
++        if (sections[i].PointerToRawData > size || sections[i].SizeOfRawData > size - sections[i].PointerToRawData) goto done;
++        if (sections[i].PointerToRawData != section_end)
++        {
++            error = ERROR_NOT_SUPPORTED;
++            goto done;
++        }
++        section_end += sections[i].SizeOfRawData;
++    }
++    if ((!sig_pos) != (!sig_size)) goto done;
++    if (sig_pos)
++    {
++        if (sig_pos < section_end || sig_pos > size) goto done;
++        if (sig_pos % 8 || sig_size != size - sig_pos)
++        {
++            error = ERROR_NOT_SUPPORTED;
++            goto done;
++        }
++    }
++    hash_end = sig_pos ? sig_pos : size;
++    if (checksum_offset + sizeof(DWORD) > security_offset ||
++        security_offset + sizeof(IMAGE_DATA_DIRECTORY) > hash_end) goto done;
++    if (!CryptHashData( hash, view, checksum_offset, 0 ) ||
++        !CryptHashData( hash, view + checksum_offset + sizeof(DWORD),
++                        security_offset - checksum_offset - sizeof(DWORD), 0 ) ||
++        !CryptHashData( hash, view + security_offset + sizeof(IMAGE_DATA_DIRECTORY),
++                        hash_end - security_offset - sizeof(IMAGE_DATA_DIRECTORY), 0 ))
++    {
++        error = GetLastError();
++        goto done;
++    }
++    if (!sig_pos && size % 8)
++    {
++        static const BYTE pad[7];
++        if (!CryptHashData( hash, pad, 8 - size % 8, 0 ))
++        {
++            error = GetLastError();
++            goto done;
++        }
++    }
++    ret = TRUE;
++done:
++    free( sections );
++    if (view) UnmapViewOfFile( view );
++    CloseHandle( mapping );
++    if (!ret) SetLastError( error );
+     return ret;
+ }
+ 
+@@ -1219,13 +1362,130 @@
+ /***********************************************************************
+  *      CryptSIPCreateIndirectData  (WINTRUST.@)
+  */
+-BOOL WINAPI CryptSIPCreateIndirectData(SIP_SUBJECTINFO* pSubjectInfo, DWORD* pcbIndirectData,
+-                                       SIP_INDIRECT_DATA* pIndirectData)
+-{
+-    FIXME("(%p %p %p) stub\n", pSubjectInfo, pcbIndirectData, pIndirectData);
+- 
+-    return FALSE;
+-}
++/* Local diagnostic candidate; included into the private Wine crypt.c copy.
++ * Uses existing Wine LGPL-2.1-or-later PE hashing and ASN.1 helpers.
++ */
++BOOL WINAPI CryptSIPCreateIndirectData(SIP_SUBJECTINFO *subject, DWORD *size,
++                                      SIP_INDIRECT_DATA *indirect)
++{
++    static const GUID pe = {0xc689aab8,0x8e78,0x11d0,{0x8c,0x47,0,0xc0,0x4f,0xc2,0x95,0xee}};
++    static const char data_oid[] = SPC_PE_IMAGE_DATA_OBJID;
++    SPC_PE_IMAGE_DATA image_data = {0};
++    HCRYPTPROV provider = 0;
++    HCRYPTHASH hash = 0;
++    HANDLE file = INVALID_HANDLE_VALUE;
++    DWORD encoded_size = 0, hash_size, required, saved_error = 0;
++    DWORD length, oid_size;
++    BYTE digest[64], *cursor;
++    ALG_ID algorithm;
++    BOOL ret = FALSE, own_provider = FALSE, own_file = FALSE;
++
++    TRACE("%p %p %p\n", subject, size, indirect);
++    if (!subject || subject->cbSize < sizeof(*subject) || !subject->pgSubjectType || !size ||
++        !subject->DigestAlgorithm.pszObjId ||
++        (subject->DigestAlgorithm.Parameters.cbData && !subject->DigestAlgorithm.Parameters.pbData))
++    {
++        SetLastError(ERROR_INVALID_PARAMETER);
++        return FALSE;
++    }
++    if (memcmp(subject->pgSubjectType, &pe, sizeof(pe)))
++    {
++        SetLastError(TRUST_E_SUBJECT_FORM_UNKNOWN);
++        return FALSE;
++    }
++    if (subject->dwFlags || subject->dwUnionChoice)
++    {
++        SetLastError(ERROR_NOT_SUPPORTED);
++        return FALSE;
++    }
++    algorithm = CertOIDToAlgId(subject->DigestAlgorithm.pszObjId);
++    if (algorithm != CALG_SHA1 && algorithm != CALG_SHA_256)
++    {
++        SetLastError(NTE_BAD_ALGID);
++        return FALSE;
++    }
++    file = subject->hFile;
++    if (!file || file == INVALID_HANDLE_VALUE)
++    {
++        if (!subject->pwsFileName)
++        {
++            SetLastError(ERROR_INVALID_PARAMETER);
++            return FALSE;
++        }
++        file = CreateFileW(subject->pwsFileName, GENERIC_READ,
++                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
++                           NULL, OPEN_EXISTING, 0, NULL);
++        if (file == INVALID_HANDLE_VALUE) return FALSE;
++        own_file = TRUE;
++    }
++    provider = subject->hProv;
++    if (!provider)
++    {
++        if (!CryptAcquireContextW(&provider, NULL, MS_ENH_RSA_AES_PROV_W,
++                                  PROV_RSA_AES, CRYPT_VERIFYCONTEXT)) goto done;
++        own_provider = TRUE;
++    }
++    if (!CryptCreateHash(provider, algorithm, 0, 0, &hash)) goto done;
++    if (!sip_pe_image_hash(file, hash)) goto done;
++    hash_size = sizeof(digest);
++    if (!CryptGetHashParam(hash, HP_HASHVAL, digest, &hash_size, 0)) goto done;
++    if (!CryptEncodeObject(X509_ASN_ENCODING, SPC_PE_IMAGE_DATA_OBJID,
++                           &image_data, NULL, &encoded_size)) goto done;
++    oid_size = strlen(subject->DigestAlgorithm.pszObjId) + 1;
++    required = sizeof(*indirect) + sizeof(data_oid) + oid_size + encoded_size + hash_size;
++    if (subject->DigestAlgorithm.Parameters.cbData > MAXDWORD - required)
++    {
++        SetLastError(ERROR_INVALID_PARAMETER);
++        goto done;
++    }
++    required += subject->DigestAlgorithm.Parameters.cbData;
++    if (!indirect)
++    {
++        *size = required;
++        ret = TRUE;
++        goto done;
++    }
++    if (*size < required)
++    {
++        *size = required;
++        SetLastError(ERROR_INSUFFICIENT_BUFFER);
++        goto done;
++    }
++    memset(indirect, 0, sizeof(*indirect));
++    cursor = (BYTE *)(indirect + 1);
++    indirect->Data.pszObjId = (char *)cursor;
++    memcpy(cursor, data_oid, sizeof(data_oid));
++    cursor += sizeof(data_oid);
++    indirect->DigestAlgorithm.pszObjId = (char *)cursor;
++    memcpy(cursor, subject->DigestAlgorithm.pszObjId, oid_size);
++    cursor += oid_size;
++    indirect->DigestAlgorithm.Parameters.cbData = subject->DigestAlgorithm.Parameters.cbData;
++    if (subject->DigestAlgorithm.Parameters.cbData)
++    {
++        indirect->DigestAlgorithm.Parameters.pbData = cursor;
++        memcpy(cursor, subject->DigestAlgorithm.Parameters.pbData,
++               subject->DigestAlgorithm.Parameters.cbData);
++        cursor += subject->DigestAlgorithm.Parameters.cbData;
++    }
++    indirect->Data.Value.pbData = cursor;
++    indirect->Data.Value.cbData = encoded_size;
++    length = encoded_size;
++    if (!CryptEncodeObject(X509_ASN_ENCODING, SPC_PE_IMAGE_DATA_OBJID,
++                           &image_data, cursor, &length)) goto done;
++    cursor += encoded_size;
++    indirect->Digest.pbData = cursor;
++    indirect->Digest.cbData = hash_size;
++    memcpy(cursor, digest, hash_size);
++    ret = TRUE;
++done:
++    saved_error = GetLastError();
++    if (hash) CryptDestroyHash(hash);
++    if (own_provider) CryptReleaseContext(provider, 0);
++    if (own_file) CloseHandle(file);
++    SetLastError(saved_error);
++    return ret;
++}
++
+ 
+ 
+ /***********************************************************************

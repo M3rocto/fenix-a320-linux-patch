@@ -1,74 +1,84 @@
-# Fenix A320 Linux Patch
+<p align="center">
+  <img src="docs/assets/mark.svg" width="76" alt="Fenix A320 Linux Patch community project mark">
+</p>
+<h1 align="center">Fenix A320 Linux Patch</h1>
+<p align="center">
+  Wine compatibility and guided setup for the Fenix A320 on Linux.
+</p>
+<p align="center">
+  <a href="#get-started"><strong>Get started</strong></a> &nbsp;·&nbsp;
+  <a href="docs/index.md">Documentation</a> &nbsp;·&nbsp;
+  <a href="#compatibility">Compatibility</a> &nbsp;·&nbsp;
+  <a href="docs/release-notes.md">Changes</a> &nbsp;·&nbsp;
+  <a href="docs/README.de.md">Deutsch</a>
+</p>
 
-Wine compatibility fixes and a guided installer for the Fenix A320 on Linux,
-with integration for [Flightdeck](https://github.com/marselnenaj/flightdeck-msfs-2024-linux-xbox)
-and the Steam editions of Microsoft Flight Simulator 2020 and 2024.
+![Original A320-family aircraft artwork above the Alps at sunset](docs/assets/fenix-panorama.png)
 
-[Download preview.10](https://github.com/marselnenaj/fenix-a320-linux-patch/releases/tag/v0.1.0-preview.10)
-· [Release notes](docs/release-notes.md) · [Report an issue](https://github.com/marselnenaj/fenix-a320-linux-patch/issues)
-· [Deutsch](docs/README.de.md)
+Bring your **purchased Fenix A320** to your Linux simulator setup with matching
+Wine/Proton fixes, GPU display sharing and a guided installer. Use the built-in
+integration in [Flightdeck](https://github.com/marselnenaj/flightdeck-msfs-2024-linux-xbox)
+for its Xbox PC editions, or the standalone setup for **Steam MSFS 2020 and 2024**.
+Installation, sign-in and activation use the official Fenix software.
 
-This is an independent community project. You need your own simulator and
-Fenix license. Sign-in, installation and activation use the official Fenix software.
+**Current public release: [0.1.0-preview.10](https://github.com/marselnenaj/fenix-a320-linux-patch/releases/tag/v0.1.0-preview.10).**
+A regular **0.1.0** release is in preparation and remains unpublished.
 
-## Current status
+**New in preview.10:** Compatibility fixes for official Installer 1.0.359 and
+Fenix v3 startup, retaining the GPU display transport and Direct2D memory-leak
+correction. Fenix 3.0.0.7454 reached working cockpit displays on the tested
+Xodus/MSFS 2024 setup. Other reported v3 startup failures remain open;
+see [compatibility](#compatibility) and [release readiness](docs/release-readiness.md).
 
-**The published build is 0.1.0-preview.10.** Version **0.1.0** is being prepared;
-it has not been published as a regular release. Fenix v3 still has unresolved
-Display and Gateway failures on the reported NVIDIA/Steam setup. A separate
-System-memory report is under investigation. See [release readiness](docs/release-readiness.md).
+## Get started
 
-| Configuration | Evidence and remaining limits |
-| --- | --- |
-| Fenix 2.4.0.4720 · MSFS 2024 1.8.16.0 · Xodus 11.0 | PFD, ND, ECAM, MCDU and cockpit readouts checked locally; complete-flight validation remains limited. |
-| Fenix 2.4.0.4720 · MSFS 2024 · CachyOS 11 | Community-reported 1 h 53 min flight with stable Display memory and no frozen displays; [System memory growth remains open](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/12). |
-| Fenix 3.0.0.7454 · MSFS 2024 1.8.16.0 · Xodus 11.0 | Official Installer 1.0.359, login, System connection and working cockpit displays checked; six bounded production starts passed. An earlier Wine assertion remains unexplained; no full-flight qualification. |
-| Fenix 3.0.0.7454 · Steam MSFS 2020 · CachyOS 11 · NVIDIA/PRIME | Reporter confirms installation, login, System and CDU. [Display initialization and Gateway startup still fail](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/7). |
+### With Flightdeck
 
-Native regression checks cover all four exact runners listed in `bundle.json`.
-They do not establish complete simulator compatibility on every runner or GPU.
-Detailed results: [Fenix v3](docs/fenix-v3.md), [GPU displays](docs/gpu-displays.md),
-[Direct2D memory fix](docs/d2d-lifetime.md).
-
-## Install with Flightdeck
-
-1. Update to **Flightdeck 0.2.18 or later** and close MSFS and Fenix.
+1. Update to **Flightdeck 0.2.18 or later**, then close MSFS and Fenix.
 2. Open **Mods → Fenix A320** and follow the highlighted setup step.
-3. Run the official Fenix Installer from your [Fenix account](https://fenixsim.com/dashboard/).
-   Sign in, install the A320 for your simulator and wait for installation to finish before closing it.
-4. Open Fenix, sign in and apply the display settings. Then start MSFS through Flightdeck.
+3. Run the official installer from your [Fenix account](https://fenixsim.com/dashboard/).
+   Sign in, install the A320 for your simulator and wait for installation to finish.
+4. Open Fenix, sign in and apply the display settings. Start MSFS through Flightdeck.
 
-Flightdeck 0.2.18 includes the checksum-pinned preview.10 integration. Future
-patch releases require an explicit Flightdeck pin update. Use Flightdeck's
-built-in panel; the standalone installer only recognizes the launch scripts
-of Flightdeck's older Python releases through 0.1.21.
+Flightdeck includes the checksum-pinned preview.10 integration. Use its built-in
+panel; newer patch versions require a matching Flightdeck integration update.
 
-## Install with Steam
+### With Steam
 
 1. Start your Steam edition of MSFS once, then close it.
-2. Download and extract the **Linux installer ZIP** linked above.
-3. Run `./install.sh` or open **Fenix A320 Linux Patch**. The guided setup runs
-   locally in your browser; no root privileges are required.
-4. Follow the steps to install the patch, select **Proton Fenix A320**, run the
-   official Fenix Installer, sign in and configure the displays.
+2. Download the **Linux installer ZIP** from the
+   [preview.10 release](https://github.com/marselnenaj/fenix-a320-linux-patch/releases/tag/v0.1.0-preview.10)
+   and extract it.
+3. Open **Fenix A320 Linux Patch** or run `./install.sh`.
+4. Follow the guided setup to install the patch, select **Proton Fenix A320**,
+   run the official Fenix installer, sign in and configure the displays.
 
-Inside the official installer, **install the A320 for the selected simulator**
-and wait for it to finish. Closing the installer before installing the aircraft
-does not complete this step.
+In the official installer, **install the A320 for the selected simulator** and
+wait for completion before closing it. Opening the installer alone does not
+install the aircraft.
 
-The setup creates a separate Proton tool from an exact supported build.
-With Steam closed it can select that tool automatically; otherwise choose it
-under **Properties → Compatibility**. `./install.sh --text` provides the same
-setup in a terminal. See [Steam setup, updates and limitations](docs/steam.md).
+The guided setup runs locally in your browser and needs no root privileges.
+It creates a separate Proton tool from an exact supported build. With Steam
+closed, it can select that tool automatically; otherwise select it under
+**Properties → Compatibility**. `./install.sh --text` offers the same setup
+in a terminal. [Steam setup guide](docs/steam.md)
 
-## Requirements and supported runners
+## What the patch provides
 
-- x86_64 Linux, glibc **2.38+**, GNU `cp`, a desktop session and a web browser.
-- A working simulator installation and a purchased Fenix A320 license.
-- Internet access for official prerequisites and the geometry dependency.
-- One of the exact Wine/Proton builds pinned in `bundle.json`.
+| Area | What it provides |
+| --- | --- |
+| **Guided setup** | Matching runner selection, verified prerequisites, official-installer launch and setup status. [Steam guide](docs/steam.md) |
+| **Cockpit displays** | GPU display sharing on supported Wine 11 builds, with CPU fallback and Legacy readouts. [Display transport](docs/gpu-displays.md) |
+| **Compatibility fixes** | Wine fixes used by the installer and v3 startup, plus the Direct2D geometry lifetime correction. [Fenix v3](docs/fenix-v3.md) · [Memory fix](docs/d2d-lifetime.md) |
+| **Updates and restore** | Verified upgrade paths that retain the aircraft, profile, renderer preference and original restore point. [Recovery](docs/mcdu-restart.md) |
 
-| Runner | Default display renderer |
+## Requirements and runners
+
+You need **x86_64 Linux with glibc 2.38+**, GNU `cp`, a desktop session, a web
+browser, a working simulator installation and a purchased Fenix A320 license.
+Internet access is required for official prerequisites and the geometry dependency.
+
+| Exact supported runner | Default display renderer |
 | --- | --- |
 | Xodus Wine 11.0 / 7c0b4354 | GPU |
 | Proton Experimental 11.0 / 20260924 | GPU |
@@ -77,20 +87,47 @@ setup in a terminal. See [Steam setup, updates and limitations](docs/steam.md).
 
 The installer is self-contained. It prepares checksum-verified Microsoft
 prerequisites, including .NET Framework 4.8 and the .NET 10 Desktop Runtime
-where required. The official Fenix installer handles its own version-specific
-prerequisites. Other runner versions need a matching overlay.
+where needed. The official Fenix installer handles its own version-specific
+prerequisites. Other runner versions require a matching overlay; exact pins
+are recorded in [bundle.json](bundle.json).
 
-## Updates, display settings and restore
+## Compatibility
 
-Updates retain the aircraft, Windows profile, settings and original restore
-point. Flightdeck applies supported patch updates before opening Fenix apps.
-The standalone installer recognizes verified earlier previews.
+**Experimental.** Native regression checks cover all four pinned runners;
+complete simulator and GPU-driver compatibility requires runtime testing.
+
+| Fenix | Tested setup | Observed behavior |
+| --- | --- | --- |
+| 2.4.0.4720 | MSFS 2024 1.8.16.0 · Xodus 11.0 | PFD, ND, ECAM, MCDU and cockpit readouts checked locally. |
+| 2.4.0.4720 | MSFS 2024 · CachyOS 11 | Community-reported 1 h 53 min flight with stable Display memory and no frozen displays. System memory growth remains open. |
+| 3.0.0.7454 | MSFS 2024 1.8.16.0 · Xodus 11.0 | Official Installer 1.0.359, login, System connection and working cockpit displays checked; six bounded production starts passed. |
+| 3.0.0.7454 | Steam MSFS 2020 · CachyOS 11 · NVIDIA/PRIME | Installation, login, System and CDU work according to the report; Display initialization and Gateway startup still fail. |
+
+Fenix v3 full-flight stability remains unvalidated, and an earlier Wine startup
+assertion is unexplained. [Issue #7](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/7)
+tracks the remaining Display/Gateway failures;
+[#12](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/12) tracks
+separate FenixSystem memory growth. See the
+[current findings and focused diagnostics](docs/display-startup.md).
 
 GPU-capable overlays use **GPU displays** and **Legacy readouts**. An explicit
 CPU preference survives updates. Weather radar is unavailable in CPU mode;
-GPU weather radar remains unverified. Brightness and flight modes remain
-normal cockpit controls. See [GPU transport](docs/gpu-displays.md),
-[display restart recovery](docs/mcdu-restart.md) and [window handling](docs/hyprland.md).
+GPU weather radar remains unverified. Brightness and flight modes are normal
+cockpit controls. [Display settings](docs/gpu-displays.md)
+
+## Updates and recovery
+
+Close MSFS and Fenix before updating. Flightdeck applies supported patch
+updates before opening Fenix apps; the standalone installer recognizes verified
+earlier previews. Updates retain the aircraft, Windows profile, settings and
+original restore point.
+
+**Restore** returns the pre-patch profile and keeps the newer profile in a
+separate local directory. Community content outside that profile is retained.
+Flightdeck's separate Xbox-save storage is outside this operation.
+
+<details>
+<summary>Terminal commands</summary>
 
 ```sh
 ./install.sh targets
@@ -101,35 +138,34 @@ normal cockpit controls. See [GPU transport](docs/gpu-displays.md),
 ./install.sh restore --steam msfs2024
 ```
 
-Use `--steam msfs2020` for the Steam 2020 edition. Older supported Flightdeck
-Python runtimes accept `--runtime /path/to/runtime` instead.
+Use `--steam msfs2020` for the Steam 2020 edition. Older Flightdeck Python
+runtimes through 0.1.21 accept `--runtime /path/to/runtime`; current Flightdeck
+releases use their built-in setup panel.
 
-**Restore** returns the pre-patch profile and retains the newer profile in a
-separate local directory. Community content outside the profile is not removed.
-Flightdeck's separate Xbox-save storage is outside this restore operation.
+</details>
 
-## Troubleshooting and bug reports
+## Documentation and support
 
-For v3 startup or black/white displays, start with the
-[current findings and next diagnostics](docs/display-startup.md). Issue
-[#7](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/7) tracks the
-remaining v3 failures; [#12](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/12)
-tracks the separate FenixSystem memory observation. An optional
-[aggregate-memory sampler](docs/system-memory.md) helps collect comparable measurements.
+Start with the [documentation index](docs/index.md) for setup, display settings,
+recovery and technical references. Report the patch, Fenix, simulator and runner
+versions, your GPU/driver and the failing step in a
+[GitHub issue](https://github.com/marselnenaj/fenix-a320-linux-patch/issues).
+Review logs and remove account, activation and license information before sharing.
+An optional [aggregate-memory sampler](docs/system-memory.md) helps investigate
+System memory growth without collecting memory contents.
 
-Include patch, Fenix, simulator and runner versions, distribution, desktop,
-GPU/driver and the failing step. Review logs before sharing them; omit account,
-activation and license data. Wine profiles and process-memory dumps are not
-needed for an initial report.
+[BUILDING.md](BUILDING.md) covers the build and test workflow. Releases include
+the installer, helper tools, replacement modules, Wine/DXVK patches and complete
+corresponding source archives. Official redistributables are downloaded from
+their publishers and checked against pinned hashes.
 
-## Source and licenses
+## License
 
-Releases include the installer, helper tools, Wine/DXVK patches, replacement
-modules, complete corresponding source archives and build instructions.
-Fenix/Microsoft binaries, aircraft, fonts, account data and private profiles
-are not distributed. Official redistributables are downloaded from their
-publishers and checked against pinned hashes.
+Installer, helpers and project artwork: [MIT](LICENSE). Wine changes and derived
+modules: **LGPL-2.1-or-later**. DXVK: **zlib/libpng**. Upstream notices are retained.
+[Third-party notices](THIRD_PARTY.md)
 
-Installer and helpers: **MIT**. Wine changes and derived modules:
-**LGPL-2.1-or-later**. DXVK: **zlib/libpng**. Upstream notices are retained.
-See [BUILDING.md](BUILDING.md) and [THIRD_PARTY.md](THIRD_PARTY.md).
+This is an independent community project, not endorsed by Fenix Simulations,
+Microsoft or the upstream projects. It distributes no Fenix/Microsoft programs,
+aircraft, fonts, account data or private profiles. The cover is original project
+artwork, not a simulator screenshot. [Artwork provenance](docs/artwork.md)

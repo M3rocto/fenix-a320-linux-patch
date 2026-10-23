@@ -1,0 +1,32 @@
+--- a/dlls/bcrypt/bcrypt_main.c
++++ b/dlls/bcrypt/bcrypt_main.c
+@@ -259,2 +259,4 @@
+     {{ MAGIC_ALG }, ALG_ID_RSA_SIGN },
++    {{ 0 }}, /* CAPI_KDF */
++    {{ MAGIC_ALG }, ALG_ID_PBKDF2 },
+ };
+--- a/dlls/bcrypt/tests/bcrypt.c
++++ b/dlls/bcrypt/tests/bcrypt.c
+@@ -4796,2 +4796,22 @@
+     ok(status == STATUS_SUCCESS, "got %#lx\n", status);
++    if (!pBCryptHash) /* < Win10 */
++    {
++        win_skip("PBKDF2 pseudo handles are not available\n");
++        return;
++    }
++
++    key = NULL;
++    status = BCryptGenerateSymmetricKey(BCRYPT_PBKDF2_ALG_HANDLE, &key, NULL, 0, (UCHAR *)"test", 4, 0);
++    ok(!status, "got %#lx\n", status);
++    if (status) return;
++
++    memset(buf, 'x', sizeof(buf));
++    size = 0;
++    status = pBCryptKeyDerivation(key, &pbkdf2_params, buf, sizeof(buf), &size, 0);
++    ok(!status, "got %#lx\n", status);
++    ok(size == sizeof(buf), "size = %lu\n", size);
++    ok(!memcmp(buf, pbkdf2_hash, sizeof(pbkdf2_hash)), "wrong data\n");
++
++    status = BCryptDestroyKey(key);
++    ok(!status, "got %#lx\n", status);
+ }

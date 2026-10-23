@@ -16,13 +16,29 @@ use std::{
 };
 
 /// What `make` builds, and where each module belongs in a runner.
-pub const TARGETS: [(&str, &str); 11] = [
+pub const TARGETS: [(&str, &str); 16] = [
     (
         "dlls/ntdll/x86_64-windows/ntdll.dll",
         "files/lib/wine/x86_64-windows/ntdll.dll",
     ),
     ("dlls/ntdll/ntdll.so", "files/lib/wine/x86_64-unix/ntdll.so"),
     ("server/wineserver", "files/bin/wineserver"),
+    (
+        "dlls/bcrypt/x86_64-windows/bcrypt.dll",
+        "files/lib/wine/x86_64-windows/bcrypt.dll",
+    ),
+    (
+        "dlls/bcrypt/bcrypt.so",
+        "files/lib/wine/x86_64-unix/bcrypt.so",
+    ),
+    (
+        "dlls/ncrypt/x86_64-windows/ncrypt.dll",
+        "files/lib/wine/x86_64-windows/ncrypt.dll",
+    ),
+    (
+        "dlls/wintrust/x86_64-windows/wintrust.dll",
+        "files/lib/wine/x86_64-windows/wintrust.dll",
+    ),
     (
         "dlls/crypt32/x86_64-windows/crypt32.dll",
         "files/lib/wine/x86_64-windows/crypt32.dll",
@@ -34,6 +50,10 @@ pub const TARGETS: [(&str, &str); 11] = [
     (
         "dlls/kernelbase/x86_64-windows/kernelbase.dll",
         "files/lib/wine/x86_64-windows/kernelbase.dll",
+    ),
+    (
+        "dlls/windows.storage.applicationdata/x86_64-windows/windows.storage.applicationdata.dll",
+        "files/lib/wine/x86_64-windows/windows.storage.applicationdata.dll",
     ),
     (
         "dlls/d2d1/x86_64-windows/d2d1.dll",

@@ -54,16 +54,15 @@ const LOGGED: [&str; 9] = [
 /// the arguments, the directory and the variables the commands set.
 const RECORD: &str = r#"#!/bin/sh
 # A stand-in of the tests: it records its call, then plays its part.
-{
-    printf '%s' "${0##*/}"
-    for argument in "$@"; do printf ' [%s]' "$argument"; done
-    printf ' cwd=%s' "$PWD"
-    for name in XDG_CACHE_HOME WINEPREFIX WINEDLLOVERRIDES WINE_TRACK_WRITECOPY WINE_FENIX_HELPER_WINDOWS DISPLAY WAYLAND_DISPLAY GIT_CEILING_DIRECTORIES SOURCE_DATE_EPOCH; do
-        eval "value=\${$name-<unset>}"
-        printf ' %s=%s' "$name" "$value"
-    done
-    printf '\n'
-} >> "$FAKE_LOG"
+recorded_call="${0##*/}"
+for argument in "$@"; do recorded_call="$recorded_call [$argument]"; done
+recorded_call="$recorded_call cwd=$PWD"
+for name in XDG_CACHE_HOME WINEPREFIX WINEDLLOVERRIDES WINE_TRACK_WRITECOPY WINE_FENIX_HELPER_WINDOWS DISPLAY WAYLAND_DISPLAY GIT_CEILING_DIRECTORIES SOURCE_DATE_EPOCH; do
+    eval "value=\${$name-<unset>}"
+    recorded_call="$recorded_call $name=$value"
+done
+# The guard and probe run concurrently; keep their records in separate writes.
+printf '%s\n' "$recorded_call" >> "$FAKE_LOG"
 "#;
 
 const PATCH: &str = r#"printf '%s\n' "${5##*/}" >> applied-patches.txt
@@ -628,12 +627,21 @@ const INTEGRATION: [&str; 6] = [
     "fenix-display-refresh.py",
 ];
 
-const PROBES: [&str; 8] = [
+const PROBES: [&str; 17] = [
     "loader-case-probe.c",
     "writecopy-probe.c",
     "iocp-smoke.c",
     "audio-notification-probe.c",
     "shared-cursor-probe.c",
+    "applicationdata-unpackaged-probe.c",
+    "volume-roundtrip-probe.c",
+    "volume-separators-probe.c",
+    "pbkdf2-probe.c",
+    "ncrypt-ecdh-probe.c",
+    "ncrypt-ecdh-vectors.h",
+    "sip-pe-probe.c",
+    "sip-pe-fixture.h",
+    "cwd-contract-probe.c",
     "window-guard-probe.c",
     "path-metrics-probe.cpp",
     "stroke-joins-probe.cpp",

@@ -114,6 +114,7 @@ fn expected_calls(work: &str, payload: &str, original: &str, container: bool) ->
     for name in [
         "files/lib/wine/x86_64-unix/ntdll.so",
         "files/bin/wineserver",
+        "files/lib/wine/x86_64-unix/bcrypt.so",
         "files/lib/wine/x86_64-unix/dwrite.so",
         "files/lib/wine/x86_64-unix/win32u.so",
         "files/lib/wine/x86_64-unix/winex11.so",
@@ -186,13 +187,55 @@ fn expected_calls(work: &str, payload: &str, original: &str, container: bool) ->
             " [-luser32] [-lgdi32]",
             &late,
         ),
+        (
+            "applicationdata-unpackaged-probe",
+            "applicationdata-unpackaged-probe",
+            " [-lruntimeobject] [-lole32]",
+            &late,
+        ),
+        (
+            "volume-roundtrip-probe",
+            "volume-roundtrip-probe",
+            "",
+            &late,
+        ),
+        (
+            "volume-separators-probe",
+            "volume-separators-probe",
+            "",
+            &late,
+        ),
+        ("pbkdf2-probe", "pbkdf2-probe", " [-lbcrypt]", &late),
+        (
+            "ncrypt-ecdh-probe",
+            "ncrypt-ecdh-probe",
+            " [-lncrypt]",
+            &late,
+        ),
+        (
+            "sip-pe-probe",
+            "sip-pe-probe",
+            " [-lcrypt32] [-ladvapi32]",
+            &late,
+        ),
+        ("cwd-contract-probe", "cwd-contract-probe", "", &late),
     ] {
+        let libraries = if source == "cwd-contract-probe" {
+            format!(" [-municode] [-DCWD_PROBE_PREFIX=L\"{at}/prefix\"]")
+        } else {
+            libraries.to_string()
+        };
         expected.extend([
             format!(
                 "{gcc} [{at}/{program}.exe] [<LAB>/repo/tests/{source}.c]{libraries} cwd=<CWD> DISPLAY=<X>"
             ),
             format!("wine [{at}/{program}.exe] cwd={at} {env}"),
         ]);
+        if source == "cwd-contract-probe" {
+            expected.push(format!(
+                "wine [{at}/{program}.exe] [--negative] cwd={at} {env}"
+            ));
+        }
     }
     expected.extend([
         format!(
@@ -293,8 +336,18 @@ fn probe_lines() -> String {
         "iocp-smoke",
         "audio-notification-probe",
         "shared-cursor-probe",
+        "applicationdata-unpackaged-probe",
+        "volume-roundtrip-probe",
+        "volume-separators-probe",
+        "pbkdf2-probe",
+        "ncrypt-ecdh-probe",
+        "sip-pe-probe",
+        "cwd-contract-probe",
     ] {
         lines += &format!("{name}:\n{name}.exe says hello\n{name}.exe notes something\n\n");
+        if name == "cwd-contract-probe" {
+            lines += "cwd-contract-negative:\ncwd-contract-probe.exe says hello\ncwd-contract-probe.exe notes something\n\n";
+        }
     }
     lines
 }
@@ -350,6 +403,29 @@ fn a_whole_smoke_test_runs_every_probe_and_stops_wine() {
     assert!(started.elapsed() < Duration::from_secs(60));
 
     let work = base.join("work");
+    assert!(work.join("prefix/drive_d").is_dir());
+    assert!(work.join("prefix/drive_c").is_dir());
+    for relative in ["drive_c", "drive_d", "dosdevices/unc/cwd-own-test/share"] {
+        assert_eq!(
+            read(
+                &work
+                    .join("prefix")
+                    .join(relative)
+                    .join("probe/own-control.txt")
+            ),
+            "synthetic cwd control\n"
+        );
+    }
+    assert_eq!(
+        digest(&work.join("prefix/drive_c/probe/cwd-contract-probe.exe")),
+        digest(&work.join("cwd-contract-probe.exe"))
+    );
+    for (drive, target) in [("c:", "../drive_c"), ("d:", "../drive_d"), ("z:", "/")] {
+        assert_eq!(
+            std::fs::read_link(work.join("prefix/dosdevices").join(drive)).unwrap(),
+            PathBuf::from(target)
+        );
+    }
     let lock = fixture.tree.lock();
     for (name, expected) in lock["files"].as_object().unwrap() {
         // The copy has the overlay, the runner it was copied from has not.
@@ -563,7 +639,7 @@ fn a_library_the_runner_did_not_need_is_refused() {
         )
     );
     let calls = fixture.calls();
-    assert_eq!(calls.len(), 10, "{calls:#?}");
+    assert_eq!(calls.len(), 12, "{calls:#?}");
     assert!(calls.iter().all(|call| call.starts_with("readelf [-d] ")));
     // The copy exists, but nothing in it was replaced or started.
     let copied = fixture.lab.base.join("libraries/runner").join(names[1]);
@@ -589,8 +665,8 @@ fn a_runner_that_does_not_start_in_the_container_ends_the_test() {
     let calls = fixture.calls();
     let expected = expected_calls("container", "repo/payload", "runner", true);
     // The server in the container is stopped; no profile was made outside it.
-    assert_eq!(calls, expected[..14].to_vec());
-    assert!(calls[13].starts_with(
+    assert_eq!(calls, expected[..16].to_vec());
+    assert!(calls[15].starts_with(
         "wineserver [-k] cwd=<LAB>/container WINEPREFIX=<LAB>/container/container-prefix "
     ));
     assert!(!fixture.lab.base.join("container/prefix").exists());

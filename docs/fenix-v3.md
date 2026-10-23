@@ -96,7 +96,9 @@ MSFS 2020/GE behavior, other runners in a real v3 cockpit, NVIDIA and weather
 radar remain unverified. The short display confirmation does not close the
 reported freeze/stall issue.
 
-The published release is experimental and the draft PR remains open.
+The published release remains experimental. The compatibility source is tracked
+in [PR #11](https://github.com/marselnenaj/fenix-a320-linux-patch/pull/11);
+regular release publication remains pending the open issue results.
 Flightdeck 0.2.18 pins preview.10; future changes require a separate manifest
 update. No general startup or long-flight stability guarantee follows
 from the bounded successful repeats.

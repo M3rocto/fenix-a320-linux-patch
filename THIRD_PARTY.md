@@ -18,6 +18,9 @@
   licensing and original per-file notices.
 * All modifications to these Wine sources are in `patches/`, in manifest order.
   The Wine patches are LGPL-2.1-or-later. See `licenses/LGPL-2.1.txt`.
+* `tests/sip-pe-fixture.h` retains the public synthetic PE fixture and notices
+  from Wine's `dlls/wintrust/tests/softpub.c`, under LGPL-2.1-or-later. The
+  own SIP probe creates this fixture as data and never executes it.
 * DXVK: https://github.com/doitsujin/dxvk at
   `6227b633e8d528952873c4c146773663964fcb31` for Xodus,
   `25ca63f17f34bdc05a39873ee63907d3cbbfa030` for the pinned Proton Experimental,
@@ -90,7 +93,7 @@ setup time and installed in the selected Windows profile. Its SHA-256 is pinned
 in `installer/src/desktop.rs` after verification against Microsoft's published
 SHA-512 release metadata. The Microsoft installer and runtime are not included
 in this project's archives. This modern runtime is separate from .NET Framework
-4.8, which the aircraft still requires.
+4.8, which setup retains for existing Fenix components.
 
 The MCDU refresh helper calls the user’s existing `SimConnect_internal.dll` from
 the installed MSFS 2024 game directory. No SimConnect library or SDK is bundled

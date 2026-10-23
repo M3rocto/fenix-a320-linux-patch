@@ -94,7 +94,7 @@ pub fn proton_downloads() -> Vec<ProtonDownload> {
 }
 
 /// The simulator runs with the configuration the overlay was verified with.
-pub const GAME_ENV: [(&str, &str); 9] = [
+pub const GAME_ENV: [(&str, &str); 11] = [
     (
         "WINE_TRACK_WRITECOPY",
         "apps:Fenix.exe,FenixSystem.exe,FenixDisplay.exe,FenixCDU.exe,FlightSimulator2024.exe,FlightSimulator.exe",
@@ -110,6 +110,11 @@ pub const GAME_ENV: [(&str, &str); 9] = [
     ("DOTNET_ReadyToRun", "0"),
     ("PROTON_NO_ESYNC", "1"),
     ("PROTON_NO_FSYNC", "1"),
+    // Proton's esync/fsync switches do not disable Wine 11 ntsync.
+    // Keep Steam launches on the server synchronization used by setup and probes.
+    ("PROTON_NO_NTSYNC", "1"),
+    // The older CachyOS 10 overlay uses the upstream fast-sync switch instead.
+    ("WINE_DISABLE_FAST_SYNC", "1"),
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -710,6 +715,19 @@ pub fn create_tool(
     atomic(&tool.join("user_settings.py"), settings.as_bytes(), 0o644)
 }
 
+/// Bring an existing tool onto the synchronization used by setup and native
+/// controls without evaluating or replacing the user's other Python settings.
+fn update_synchronization(tool: &Path) -> Result<()> {
+    const SETTING: &str = "\n# Fenix: use the server synchronization verified with this overlay.\nuser_settings[\"PROTON_NO_NTSYNC\"] = \"1\"\nuser_settings[\"WINE_DISABLE_FAST_SYNC\"] = \"1\"\n";
+    let path = tool.join("user_settings.py");
+    let mut settings = fsx::read_text(regular(&path, Some(16 * MIB))?)?;
+    if !settings.contains(SETTING) {
+        settings.push_str(SETTING);
+        atomic(&path, settings.as_bytes(), 0o644)?;
+    }
+    Ok(())
+}
+
 pub fn verify_tool(
     system: &dyn System,
     tool: &Path,
@@ -1035,6 +1053,7 @@ pub fn update(
     marker.insert("version".into(), version.clone());
     write_json(&tool.join(TOOL_MARKER), &Value::Object(marker.clone()))?;
     core::apply_overlay(system, &item.prefix(), &tool, bundle, variant.as_deref())?;
+    update_synchronization(&tool)?;
     marker.insert("state".into(), json!("ready"));
     write_json(&tool.join(TOOL_MARKER), &Value::Object(marker))?;
     let mut updated = json::object(state.clone(), "The patch state")?;

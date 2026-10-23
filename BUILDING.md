@@ -43,7 +43,8 @@ xgameruntime submodule, generates spec/Vulkan headers from the included XML,
 and configures Wine with `--enable-win64 --disable-tests --enable-silent-rules
 --without-ffmpeg --without-unwind`. Without the last option `configure` links
 `ntdll.so` against the build host's libunwind, which the pinned runners and the
-Steam Linux Runtime containers do not have. It builds the eleven original targets listed in `tools/src/build.rs` and
+Steam Linux Runtime containers do not have. It builds the sixteen targets listed
+in `tools/src/build.rs`, including WinRT storage, BCrypt, NCrypt and Wintrust, and
 the independent MIT window guard, geometry setup and MCDU refresh helpers. Debug sections are stripped from release files.
 Compiler prefix maps replace local checkout paths in both Unix and Windows
 modules with `/usr/src/fenix-a320-linux-patch`.
@@ -122,7 +123,7 @@ and keep the existing 32-bit clients. They do not import Xodus's mapped-image
 protocol extension: Flightdeck provides the portable Store loader. The selected
 runner's graphics DLLs are preserved except the same-revision DXGI in overlays
 with their own `dxvk` block. An overlay without that block keeps the original
-eleven Wine targets and does not inherit the base overlay's DXVK build. CachyOS retains its existing
+sixteen Wine targets and does not inherit the base overlay's DXVK build. CachyOS retains its existing
 arc/group rendering; exact path streaming avoids its rotated-arc simplification
 error when computing metrics. Its remote-thread activation-context fix belongs
 in ntdll, while Experimental's implementation is in kernelbase.
@@ -137,6 +138,40 @@ Xvfb), and download pinned Microsoft geometry dependencies. They compare route
 metrics and rasterized stroke contours with an independent geometry reference,
 check actual X11 mapping as well as Win32 visibility, and run the existing
 loader, cursor, write-copy, IOCP and audio regressions.
+The unpackaged WinRT probe checks that `ApplicationData.Current` returns the
+native no-package error and clears its output, allowing ordinary desktop
+applications to use their own storage fallback. See the
+[storage compatibility scope](docs/winrt-storage.md) for installer observations
+and validation limits.
+The volume-path probes use separate C/D scratch roots, discover their actual
+NT identities and compare direct NT/GLOBALROOT paths with extended-DOS
+controls, including root separator counts and unchanged SystemRoot behavior.
+See [NT volume device paths](docs/volume-device-paths.md) for the filesystem
+scope and local Fenix observations. `ntdll.so` is already a standard build
+target; this fix changes no server protocol or Windows NTDLL module.
+The PBKDF2 probe checks fifteen synthetic vector/API combinations across
+opened providers, the documented pseudo-handle and the legacy derivation
+API. It covers SHA1/256/384/512, long and empty inputs, and multi-block output.
+See [PBKDF2 pseudo-handle compatibility](docs/pbkdf2-pseudo-handle.md).
+The NCrypt probe uses fixed synthetic P256 keys and independent hash
+references. It checks key/blob bounds, malformed-key rejection, finalized
+state, owning provider handles, output sizing/truncation and 1,000 disposal
+cycles. See [ephemeral NCrypt ECDH compatibility](docs/ncrypt-ecdh.md) for the
+bounded software-provider and KDF scope. The matching BCrypt Unix backend
+validates imported P256 parameters; the PBKDF2 Windows module stays unchanged.
+The SIP probe uses a public Wine PE fixture with a known Windows SHA1 digest,
+independent SHA256/PE32+ references, four hash mutations, 22 malformed or
+unsupported layouts and output-buffer canaries. It creates its own files
+and registers the PE provider only in the isolated smoke prefix. See
+[bounded PE indirect data](docs/pe-indirect-data.md) for the supported layout
+and the still-unmeasured native ASN.1/required-size representation.
+The current-directory probe uses explicitly owned C/D/UNC fixtures, checks
+194 parent/128 inherited-child operations and runs separate negative cases.
+It verifies that opened GLOBALROOT directories store a rooted DOS/UNC cwd
+and that a rejected over-capacity path preserves the old state. See
+[current-directory conversion](docs/current-directory.md) for source ports,
+boundary controls. The [v3 validation record](docs/fenix-v3.md) separates
+the working cockpit observation from the unresolved startup assertion.
 The Direct2D lifetime probe checks live heap growth after 300,000 geometries
 on both normal and error paths, and 20,000 deterministic near-degenerate paths
 with a per-case watchdog. See [lifetime and termination](docs/d2d-lifetime.md).

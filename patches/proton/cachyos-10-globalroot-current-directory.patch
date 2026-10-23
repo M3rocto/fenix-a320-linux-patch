@@ -1,0 +1,77 @@
+--- a/dlls/ntdll/path.c
++++ b/dlls/ntdll/path.c
+@@ -913,6 +913,11 @@
+  */
+ NTSTATUS WINAPI RtlSetCurrentDirectory_U(const UNICODE_STRING* dir)
+ {
++    struct
++    {
++        OBJECT_NAME_INFORMATION info;
++        WCHAR buffer[MAX_PATH + 4];
++    } name;
+     FILE_FS_DEVICE_INFORMATION device_info;
+     ULONG size, compare_size;
+     OBJECT_ATTRIBUTES attr;
+@@ -965,6 +970,26 @@
+                       FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT );
+     if (nts != STATUS_SUCCESS) goto out;
+ 
++    if (newdir.Length >= 15 * sizeof(WCHAR) &&
++        !wcsnicmp( newdir.Buffer, L"\\??\\GLOBALROOT\\", 15 ))
++    {
++        /* A current directory must have a DOS disk or UNC share designator.
++         * Resolve the opened GLOBALROOT alias before dropping the NT prefix. */
++        nts = NtQueryObject( handle, ObjectNameInformation, &name, sizeof(name), NULL );
++        if (nts) goto failed;
++        ptr = name.info.Name.Buffer;
++        size = name.info.Name.Length / sizeof(WCHAR);
++        if (size < 7 || wcsncmp( ptr, L"\\??\\", 4 ) ||
++            ((ptr[5] != ':' || ptr[6] != '\\') &&
++             (size < 8 || wcsnicmp( ptr + 4, L"UNC\\", 4 ))))
++        {
++            nts = STATUS_OBJECT_NAME_INVALID;
++            goto failed;
++        }
++        ptr += 4;
++        size -= 4;
++    }
++
+     /* don't keep the directory handle open on removable media */
+     if (!NtQueryVolumeInformationFile( handle, &io, &device_info,
+                                        sizeof(device_info), FileFsDeviceInformation ) &&
+@@ -974,9 +999,6 @@
+         handle = 0;
+     }
+ 
+-    if (curdir->Handle) NtClose( curdir->Handle );
+-    curdir->Handle = handle;
+-
+     /* append trailing \ if missing */
+     if (size && ptr[size - 1] != '\\') ptr[size++] = '\\';
+ 
+@@ -988,12 +1010,24 @@
+         *ptr = '\\';
+     }
+ 
++    if ((size + 1) * sizeof(WCHAR) > curdir->DosPath.MaximumLength)
++    {
++        nts = STATUS_NAME_TOO_LONG;
++        goto failed;
++    }
++
++    if (curdir->Handle) NtClose( curdir->Handle );
++    curdir->Handle = handle;
++
+     memcpy( curdir->DosPath.Buffer, ptr, size * sizeof(WCHAR));
+     curdir->DosPath.Buffer[size] = 0;
+     curdir->DosPath.Length = size * sizeof(WCHAR);
+ 
+     TRACE( "curdir now %s %p\n", debugstr_w(curdir->DosPath.Buffer), curdir->Handle );
+-
++    goto out;
++
++ failed:
++    if (handle) NtClose( handle );
+  out:
+     RtlFreeUnicodeString( &newdir );
+     RtlReleasePebLock();

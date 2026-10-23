@@ -1,0 +1,162 @@
+Subject: [PATCH] Port NCrypt ECDH support to the older CachyOS 10 sources.
+
+Define the standard ECDH algorithm-group string and move the validation
+checks to this source version's actual ECC raw-import sites. The common
+v2 patch uses generic context that otherwise matches RSA/DSA import sites.
+
+--- a/include/bcrypt.h
++++ b/include/bcrypt.h
+@@ -82,20 +82,21 @@
+ #define LEGACY_RSAPRIVATE_BLOB      L"CAPIPRIVATEBLOB"
+ 
+ #define MS_PRIMITIVE_PROVIDER       L"Microsoft Primitive Provider"
+ #define MS_PLATFORM_CRYPTO_PROVIDER L"Microsoft Platform Crypto Provider"
+ 
+ #define BCRYPT_3DES_ALGORITHM       L"3DES"
+ #define BCRYPT_AES_ALGORITHM        L"AES"
+ #define BCRYPT_DES_ALGORITHM        L"DES"
+ #define BCRYPT_DH_ALGORITHM         L"DH"
+ #define BCRYPT_DSA_ALGORITHM        L"DSA"
++#define BCRYPT_ECDH_ALGORITHM       L"ECDH"
+ #define BCRYPT_ECDH_P256_ALGORITHM  L"ECDH_P256"
+ #define BCRYPT_ECDH_P384_ALGORITHM  L"ECDH_P384"
+ #define BCRYPT_ECDH_P521_ALGORITHM  L"ECDH_P521"
+ #define BCRYPT_ECDSA_P256_ALGORITHM L"ECDSA_P256"
+ #define BCRYPT_ECDSA_P384_ALGORITHM L"ECDSA_P384"
+ #define BCRYPT_ECDSA_P521_ALGORITHM L"ECDSA_P521"
+ #define BCRYPT_MD2_ALGORITHM        L"MD2"
+ #define BCRYPT_MD4_ALGORITHM        L"MD4"
+ #define BCRYPT_MD5_ALGORITHM        L"MD5"
+ #define BCRYPT_RC2_ALGORITHM        L"RC2"
+@@ -167,20 +168,21 @@
+ static const WCHAR MS_PRIMITIVE_PROVIDER[] = \
+ {'M','i','c','r','o','s','o','f','t',' ','P','r','i','m','i','t','i','v','e',' ','P','r','o','v','i','d','e','r',0};
+ static const WCHAR MS_PLATFORM_CRYPTO_PROVIDER[] = \
+ {'M','i','c','r','o','s','o','f','t',' ','P','l','a','t','f','o','r','m',' ','C','r','y','p','t','o',' ','P','r','o','v','i','d','e','r',0};
+ 
+ static const WCHAR BCRYPT_3DES_ALGORITHM[] = {'3','D','E','S',0};
+ static const WCHAR BCRYPT_AES_ALGORITHM[] = {'A','E','S',0};
+ static const WCHAR BCRYPT_DES_ALGORITHM[] = {'D','E','S',0};
+ static const WCHAR BCRYPT_DH_ALGORITHM[] = {'D','H',0};
+ static const WCHAR BCRYPT_DSA_ALGORITHM[] = {'D','S','A',0};
++static const WCHAR BCRYPT_ECDH_ALGORITHM[] = {'E','C','D','H',0};
+ static const WCHAR BCRYPT_ECDH_P256_ALGORITHM[] = {'E','C','D','H','_','P','2','5','6',0};
+ static const WCHAR BCRYPT_ECDH_P384_ALGORITHM[] = {'E','C','D','H','_','P','3','8','4',0};
+ static const WCHAR BCRYPT_ECDSA_P256_ALGORITHM[] = {'E','C','D','S','A','_','P','2','5','6',0};
+ static const WCHAR BCRYPT_ECDSA_P384_ALGORITHM[] = {'E','C','D','S','A','_','P','3','8','4',0};
+ static const WCHAR BCRYPT_ECDSA_P521_ALGORITHM[] = {'E','C','D','S','A','_','P','5','2','1',0};
+ static const WCHAR BCRYPT_MD2_ALGORITHM[] = {'M','D','2',0};
+ static const WCHAR BCRYPT_MD4_ALGORITHM[] = {'M','D','4',0};
+ static const WCHAR BCRYPT_MD5_ALGORITHM[] = {'M','D','5',0};
+ static const WCHAR BCRYPT_RC2_ALGORITHM[] = {'R','C','2',0};
+ static const WCHAR BCRYPT_RC4_ALGORITHM[] = {'R','C','4',0};
+--- a/dlls/bcrypt/gnutls.c
++++ b/dlls/bcrypt/gnutls.c
+@@ -1710,20 +1710,26 @@
+     k.data = y.data + ecc_blob->cbKey;
+     k.size = ecc_blob->cbKey;
+ 
+     if ((ret = pgnutls_privkey_import_ecc_raw( handle, curve, &x, &y, &k )))
+     {
+         pgnutls_perror( ret );
+         pgnutls_privkey_deinit( handle );
+         return STATUS_INTERNAL_ERROR;
+     }
+ 
++    if (key->alg_id == ALG_ID_ECDH_P256 && (ret = pgnutls_privkey_verify_params( handle )))
++    {
++        pgnutls_privkey_deinit( handle );
++        return ret == GNUTLS_E_UNKNOWN_PK_ALGORITHM ? STATUS_NOT_SUPPORTED : STATUS_INVALID_PARAMETER;
++    }
++
+     if (key_data(key)->a.privkey) pgnutls_privkey_deinit( key_data(key)->a.privkey );
+     key_data(key)->a.privkey = handle;
+     return STATUS_SUCCESS;
+ }
+ 
+ static NTSTATUS key_export_rsa( struct key *key, ULONG flags, UCHAR *buf, ULONG len, ULONG *ret_len )
+ {
+     BCRYPT_RSAKEY_BLOB *rsa_blob;
+     gnutls_datum_t m, e, d, p, q, u, e1, e2;
+     ULONG size = len_from_bitlen( key->u.a.bitlen );
+@@ -1806,26 +1812,20 @@
+     q.data = p.data + p.size;
+     q.size = rsa_blob->cbPrime2;
+ 
+     if ((ret = pgnutls_privkey_import_rsa_raw( handle, &m, &e, NULL, &p, &q, NULL, NULL, NULL )))
+     {
+         pgnutls_perror( ret );
+         pgnutls_privkey_deinit( handle );
+         return STATUS_INTERNAL_ERROR;
+     }
+ 
+-    if (key->alg_id == ALG_ID_ECDH_P256 && (ret = pgnutls_privkey_verify_params( handle )))
+-    {
+-        pgnutls_privkey_deinit( handle );
+-        return ret == GNUTLS_E_UNKNOWN_PK_ALGORITHM ? STATUS_NOT_SUPPORTED : STATUS_INVALID_PARAMETER;
+-    }
+-
+     if (key_data(key)->a.privkey) pgnutls_privkey_deinit( key_data(key)->a.privkey );
+     key_data(key)->a.privkey = handle;
+     return STATUS_SUCCESS;
+ }
+ 
+ static NTSTATUS key_export_dsa_capi( struct key *key, UCHAR *buf, ULONG len, ULONG *ret_len )
+ {
+     BLOBHEADER *hdr;
+     DSSPUBKEY *pubkey;
+     gnutls_datum_t p, q, g, y, x;
+@@ -1981,20 +1981,26 @@
+     x.data = buf + sizeof(*ecc_blob);
+     x.size = ecc_blob->cbKey;
+     y.data = buf + sizeof(*ecc_blob) + ecc_blob->cbKey;
+     y.size = ecc_blob->cbKey;
+ 
+     if ((ret = pgnutls_pubkey_import_ecc_raw( handle, curve, &x, &y )))
+     {
+         pgnutls_perror( ret );
+         pgnutls_pubkey_deinit( handle );
+         return STATUS_INTERNAL_ERROR;
++    }
++
++    if (key->alg_id == ALG_ID_ECDH_P256 && (ret = pgnutls_pubkey_verify_params( handle )))
++    {
++        pgnutls_pubkey_deinit( handle );
++        return ret == GNUTLS_E_UNKNOWN_PK_ALGORITHM ? STATUS_NOT_SUPPORTED : STATUS_INVALID_PARAMETER;
+     }
+ 
+     if (key_data(key)->a.pubkey) pgnutls_pubkey_deinit( key_data(key)->a.pubkey );
+     key_data(key)->a.pubkey = handle;
+     return STATUS_SUCCESS;
+ }
+ 
+ static NTSTATUS key_import_rsa_public( struct key *key, UCHAR *buf, ULONG len )
+ {
+     BCRYPT_RSAKEY_BLOB *rsa_blob;
+@@ -2098,26 +2104,20 @@
+ 
+     y.data = y_data;
+     y.size = sizeof(y_data);
+     for (i = 0; i < y.size; i++) y.data[i] = data[y.size - i - 1];
+ 
+     if ((ret = pgnutls_pubkey_import_dsa_raw( handle, &p, &q, &g, &y )))
+     {
+         pgnutls_perror( ret );
+         pgnutls_pubkey_deinit( handle );
+         return STATUS_INTERNAL_ERROR;
+-    }
+-
+-    if (key->alg_id == ALG_ID_ECDH_P256 && (ret = pgnutls_pubkey_verify_params( handle )))
+-    {
+-        pgnutls_pubkey_deinit( handle );
+-        return ret == GNUTLS_E_UNKNOWN_PK_ALGORITHM ? STATUS_NOT_SUPPORTED : STATUS_INVALID_PARAMETER;
+     }
+ 
+     if (key_data(key)->a.pubkey) pgnutls_pubkey_deinit( key_data(key)->a.pubkey );
+     key_data(key)->a.pubkey = handle;
+     return STATUS_SUCCESS;
+ }
+ 
+ static NTSTATUS key_asymmetric_export( void *args )
+ {
+     const struct key_asymmetric_export_params *params = args;

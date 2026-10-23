@@ -1,0 +1,580 @@
+--- a/dlls/ncrypt/main.c
++++ b/dlls/ncrypt/main.c
+@@ -55,7 +55,15 @@
+     struct object *ret;
+     if (!(ret = calloc(1, sizeof(*ret)))) return NULL;
+     ret->type = type;
++    ret->refs = 1;
++    TRACE("allocated object %p type %u\n", ret, type);
+     return ret;
++}
++
++static void provider_addref(NCRYPT_PROV_HANDLE handle)
++{
++    struct object *object = (struct object *)handle;
++    InterlockedIncrement(&object->refs);
+ }
+ 
+ static struct object_property *get_object_property(struct object *object, const WCHAR *name)
+@@ -124,6 +132,26 @@
+     memcpy(property->value, value, value_size);
+ 
+     return ERROR_SUCCESS;
++}
++
++static void free_object_properties(struct object *object)
++{
++    unsigned int i;
++    for (i = 0; i < object->num_properties; i++)
++    {
++        free(object->properties[i].key);
++        free(object->properties[i].value);
++    }
++    free(object->properties);
++}
++
++static void free_partial_key_object(struct object *object)
++{
++    if (object->key.bcrypt_key) BCryptDestroyKey(object->key.bcrypt_key);
++    if (object->key.provider) NCryptFreeObject(object->key.provider);
++    free_object_properties(object);
++    TRACE("destroyed object %p type %u\n", object, object->type);
++    free(object);
+ }
+ 
+ static struct object *create_key_object(enum algid algid, NCRYPT_PROV_HANDLE provider)
+@@ -150,19 +178,42 @@
+         set_object_property(object, BCRYPT_SIGNATURE_LENGTH, (BYTE *)&dw_value, sizeof(dw_value));
+         break;
+ 
++    case ECDH_P256:
++        if (!(object = allocate_object(KEY))) return NULL;
++        object->key.algid = ECDH_P256;
++        supported_lengths.dwMinLength = supported_lengths.dwMaxLength = supported_lengths.dwDefaultLength = 256;
++        supported_lengths.dwIncrement = 0;
++        dw_value = 256;
++        if (set_object_property(object, NCRYPT_ALGORITHM_PROPERTY, (BYTE *)BCRYPT_ECDH_P256_ALGORITHM,
++                                sizeof(BCRYPT_ECDH_P256_ALGORITHM)) ||
++            set_object_property(object, NCRYPT_ALGORITHM_GROUP_PROPERTY, (BYTE *)BCRYPT_ECDH_ALGORITHM,
++                                sizeof(BCRYPT_ECDH_ALGORITHM)) ||
++            set_object_property(object, NCRYPT_LENGTHS_PROPERTY, (BYTE *)&supported_lengths, sizeof(supported_lengths)) ||
++            set_object_property(object, NCRYPT_LENGTH_PROPERTY, (BYTE *)&dw_value, sizeof(dw_value)) ||
++            set_object_property(object, BCRYPT_PUBLIC_KEY_LENGTH, (BYTE *)&dw_value, sizeof(dw_value)))
++        {
++            free_partial_key_object(object);
++            return NULL;
++        }
++        break;
++
+     default:
+         ERR("Invalid algid %#x\n", algid);
+         return NULL;
+     }
+ 
+     dw_value = 0;
+-    set_object_property(object, NCRYPT_EXPORT_POLICY_PROPERTY, (BYTE *)&dw_value, sizeof(dw_value));
++    if (set_object_property(object, NCRYPT_EXPORT_POLICY_PROPERTY, (BYTE *)&dw_value, sizeof(dw_value))) goto failed;
+     dw_value = NCRYPT_ALLOW_ALL_USAGES;
+-    set_object_property(object, NCRYPT_KEY_USAGE_PROPERTY, (BYTE *)&dw_value, sizeof(dw_value));
++    if (set_object_property(object, NCRYPT_KEY_USAGE_PROPERTY, (BYTE *)&dw_value, sizeof(dw_value))) goto failed;
+     dw_value = 0;
+-    set_object_property(object, NCRYPT_KEY_TYPE_PROPERTY, (BYTE *)&dw_value, sizeof(dw_value));
+-    set_object_property(object, NCRYPT_PROVIDER_HANDLE_PROPERTY, (BYTE *)&provider, sizeof(provider));
++    if (set_object_property(object, NCRYPT_KEY_TYPE_PROPERTY, (BYTE *)&dw_value, sizeof(dw_value))) goto failed;
++    provider_addref(provider);
++    object->key.provider = provider;
+     return object;
++failed:
++    free_partial_key_object(object);
++    return NULL;
+ }
+ 
+ SECURITY_STATUS WINAPI NCryptCreatePersistedKey(NCRYPT_PROV_HANDLE provider, NCRYPT_KEY_HANDLE *key,
+@@ -173,10 +224,30 @@
+     TRACE("(%#Ix, %p, %s, %s, %#lx, %#lx)\n", provider, key, wine_dbgstr_w(algid),
+           wine_dbgstr_w(name), keyspec, flags);
+ 
+-    if (!provider) return NTE_INVALID_HANDLE;
++    if (!provider || ((struct object *)provider)->type != STORAGE_PROVIDER) return NTE_INVALID_HANDLE;
+     if (!algid) return HRESULT_FROM_WIN32(RPC_X_NULL_REF_POINTER);
+     if (name) FIXME("Persistent keys are not supported\n");
+ 
++    if (!lstrcmpiW(algid, BCRYPT_ECDH_P256_ALGORITHM))
++    {
++        NTSTATUS status;
++        if (!((struct object *)provider)->storage_provider.ecdh_supported) return NTE_NOT_SUPPORTED;
++        if (!key) return NTE_INVALID_PARAMETER;
++        *key = 0;
++        if (name) return NTE_NOT_SUPPORTED;
++        if (flags) return NTE_BAD_FLAGS;
++        if (keyspec) return NTE_INVALID_PARAMETER;
++        if (!(object = create_key_object(ECDH_P256, provider))) return NTE_NO_MEMORY;
++        status = BCryptGenerateKeyPair(BCRYPT_ECDH_P256_ALG_HANDLE, &object->key.bcrypt_key, 256, 0);
++        if (status)
++        {
++            free_partial_key_object(object);
++            return map_ntstatus(status);
++        }
++        *key = (NCRYPT_KEY_HANDLE)object;
++        return ERROR_SUCCESS;
++    }
++
+     if (!lstrcmpiW(algid, BCRYPT_RSA_ALGORITHM))
+     {
+         NTSTATUS status;
+@@ -192,7 +263,7 @@
+         if (status != STATUS_SUCCESS)
+         {
+             ERR("Error generating key pair %#lx\n", status);
+-            free(object);
++            free_partial_key_object(object);
+             return map_ntstatus(status);
+         }
+ 
+@@ -275,6 +346,15 @@
+ 
+     if (!object || object->type != KEY) return NTE_INVALID_HANDLE;
+ 
++    if (object->key.algid == ECDH_P256)
++    {
++        if (flags & ~NCRYPT_SILENT_FLAG) return NTE_BAD_FLAGS;
++        if (object->key.finalized) return NTE_INVALID_HANDLE;
++        status = BCryptFinalizeKeyPair(object->key.bcrypt_key, 0);
++        if (!status) object->key.finalized = TRUE;
++        return map_ntstatus(status);
++    }
++
+     if (!(prop = get_object_property(object, NCRYPT_LENGTH_PROPERTY))) return NTE_INVALID_HANDLE;
+     key_length = *(DWORD *)prop->value;
+     status = BCryptSetProperty(object->key.bcrypt_key, BCRYPT_KEY_LENGTH, (UCHAR *)&key_length, sizeof(key_length), 0);
+@@ -309,7 +389,6 @@
+ {
+     struct object *object = (struct object *)handle;
+     SECURITY_STATUS ret = STATUS_SUCCESS;
+-    unsigned int i;
+ 
+     TRACE("(%#Ix)\n", handle);
+ 
+@@ -324,9 +403,14 @@
+     case KEY:
+     {
+         if ((ret = free_key_object(&object->key))) return ret;
++        if (object->key.provider) NCryptFreeObject(object->key.provider);
+         break;
+     }
+     case STORAGE_PROVIDER:
++        if (InterlockedDecrement(&object->refs)) return ERROR_SUCCESS;
++        break;
++    case SECRET:
++        if ((ret = map_ntstatus(BCryptDestroySecret(object->secret)))) return ret;
+         break;
+ 
+     default:
+@@ -334,12 +418,8 @@
+         return NTE_INVALID_HANDLE;
+     }
+ 
+-    for (i = 0; i < object->num_properties; i++)
+-    {
+-        free(object->properties[i].key);
+-        free(object->properties[i].value);
+-    }
+-    free(object->properties);
++    free_object_properties(object);
++    TRACE("destroyed object %p type %u\n", object, object->type);
+     free(object);
+     return ret;
+ }
+@@ -354,6 +434,18 @@
+     if (flags) FIXME("flags %#lx not supported\n", flags);
+ 
+     if (!object) return NTE_INVALID_HANDLE;
++    if (object->type == SECRET) return NTE_INVALID_HANDLE;
++    if (!name || !result) return NTE_INVALID_PARAMETER;
++    if (!wcscmp(name, NCRYPT_PROVIDER_HANDLE_PROPERTY) && object->type == KEY)
++    {
++        *result = sizeof(object->key.provider);
++        if (!output) return ERROR_SUCCESS;
++        if (outsize < sizeof(object->key.provider)) return NTE_BUFFER_TOO_SMALL;
++        if (!object->key.provider) return NTE_INVALID_HANDLE;
++        memcpy(output, &object->key.provider, sizeof(object->key.provider));
++        provider_addref(object->key.provider);
++        return ERROR_SUCCESS;
++    }
+     if (!(property = get_object_property(object, name))) return NTE_INVALID_PARAMETER;
+ 
+     *result = property->value_size;
+@@ -379,7 +471,8 @@
+         FIXME("Key blob decryption not implemented\n");
+         return NTE_NOT_SUPPORTED;
+     }
+-    if (params)
++    if (params && !(data && datasize >= sizeof(*header) &&
++        (header->Magic == BCRYPT_ECDH_PUBLIC_P256_MAGIC || header->Magic == BCRYPT_ECDH_PRIVATE_P256_MAGIC)))
+     {
+         FIXME("Parameter information not implemented\n");
+         return NTE_NOT_SUPPORTED;
+@@ -392,6 +485,48 @@
+     {
+         WARN("Invalid flags %#lx\n", flags);
+         return NTE_BAD_FLAGS;
++    }
++
++    if (!data || datasize < sizeof(*header) || !type || !handle) return NTE_INVALID_PARAMETER;
++    if (!provider || ((struct object *)provider)->type != STORAGE_PROVIDER) return NTE_INVALID_HANDLE;
++    if (header->Magic == BCRYPT_ECDH_PUBLIC_P256_MAGIC || header->Magic == BCRYPT_ECDH_PRIVATE_P256_MAGIC)
++    {
++        BCRYPT_ECCKEY_BLOB *blob = (BCRYPT_ECCKEY_BLOB *)data;
++        BOOL public_only = header->Magic == BCRYPT_ECDH_PUBLIC_P256_MAGIC;
++        const WCHAR *blob_type = public_only ? BCRYPT_ECCPUBLIC_BLOB : BCRYPT_ECCPRIVATE_BLOB;
++        NTSTATUS status;
++        if (!provider || ((struct object *)provider)->type != STORAGE_PROVIDER) return NTE_INVALID_HANDLE;
++        if (!((struct object *)provider)->storage_provider.ecdh_supported) return NTE_NOT_SUPPORTED;
++        *handle = 0;
++        if (datasize < sizeof(*blob) || blob->cbKey != 32 || datasize != sizeof(*blob) + 32 * (public_only ? 2 : 3))
++            return NTE_INVALID_PARAMETER;
++        if (params)
++        {
++            NCryptBuffer *buffer;
++            const WCHAR *curve;
++            if (params->ulVersion != BCRYPTBUFFER_VERSION || params->cBuffers != 1 || !params->pBuffers)
++                return NTE_INVALID_PARAMETER;
++            buffer = params->pBuffers;
++            curve = buffer->pvBuffer;
++            if (buffer->BufferType != NCRYPTBUFFER_ECC_CURVE_NAME) return NTE_NOT_SUPPORTED;
++            if (!curve || buffer->cbBuffer < sizeof(WCHAR) || buffer->cbBuffer % sizeof(WCHAR) ||
++                curve[buffer->cbBuffer / sizeof(WCHAR) - 1]) return NTE_INVALID_PARAMETER;
++            if (wcscmp(curve, L"nistP256")) return NTE_NOT_SUPPORTED;
++        }
++        if (wcscmp(type, blob_type) && wcscmp(type, public_only ? BCRYPT_PUBLIC_KEY_BLOB : BCRYPT_PRIVATE_KEY_BLOB))
++            return NTE_INVALID_PARAMETER;
++        if (!(object = create_key_object(ECDH_P256, provider))) return NTE_NO_MEMORY;
++        status = BCryptImportKeyPair(BCRYPT_ECDH_P256_ALG_HANDLE, NULL, blob_type,
++                                     &object->key.bcrypt_key, data, datasize, 0);
++        if (status)
++        {
++            free_partial_key_object(object);
++            return map_ntstatus(status);
++        }
++        object->key.finalized = TRUE;
++        object->key.public_only = public_only;
++        *handle = (NCRYPT_KEY_HANDLE)object;
++        return ERROR_SUCCESS;
+     }
+ 
+     switch(header->Magic)
+@@ -413,7 +548,7 @@
+         if (status != STATUS_SUCCESS)
+         {
+             WARN("Error importing key pair %#lx\n", status);
+-            free(object);
++            free_partial_key_object(object);
+             return map_ntstatus(status);
+         }
+ 
+@@ -438,6 +573,33 @@
+ 
+     TRACE("(%#Ix, %#Ix, %s, %p, %p, %lu, %p, %#lx)\n", key, encrypt_key, wine_dbgstr_w(type), params, output,
+           output_len, ret_len, flags);
++
++    if (!object || object->type != KEY) return NTE_INVALID_HANDLE;
++    if (object->key.algid == ECDH_P256)
++    {
++        const struct object_property *policy;
++        NTSTATUS status;
++        ULONG required;
++        if (!type || !ret_len) return NTE_INVALID_PARAMETER;
++        if (flags & ~NCRYPT_SILENT_FLAG) return NTE_BAD_FLAGS;
++        if (encrypt_key || params) return NTE_NOT_SUPPORTED;
++        if (!object->key.finalized) return NTE_BAD_KEY_STATE;
++        if (!wcscmp(type, BCRYPT_PRIVATE_KEY_BLOB)) type = BCRYPT_ECCPRIVATE_BLOB;
++        if (!wcscmp(type, BCRYPT_PUBLIC_KEY_BLOB)) type = BCRYPT_ECCPUBLIC_BLOB;
++        if (!wcscmp(type, BCRYPT_ECCPRIVATE_BLOB))
++        {
++            if (object->key.public_only) return NTE_BAD_KEY_STATE;
++            policy = get_object_property(object, NCRYPT_EXPORT_POLICY_PROPERTY);
++            if (!policy || !(*(DWORD *)policy->value & NCRYPT_ALLOW_PLAINTEXT_EXPORT_FLAG)) return NTE_PERM;
++        }
++        else if (wcscmp(type, BCRYPT_ECCPUBLIC_BLOB)) return NTE_NOT_SUPPORTED;
++        status = BCryptExportKey(object->key.bcrypt_key, NULL, type, NULL, 0, &required, 0);
++        if (status) return map_ntstatus(status);
++        *ret_len = required;
++        if (!output) return ERROR_SUCCESS;
++        if (output_len < required) return NTE_BUFFER_TOO_SMALL;
++        return map_ntstatus(BCryptExportKey(object->key.bcrypt_key, NULL, type, output, output_len, ret_len, 0));
++    }
+ 
+     if (encrypt_key)
+     {
+@@ -527,6 +689,7 @@
+         ERR("Error allocating memory.\n");
+         return NTE_NO_MEMORY;
+     }
++    object->storage_provider.ecdh_supported = !flags && (!name || !wcscmp(name, MS_KEY_STORAGE_PROVIDER));
+     *provider = (NCRYPT_PROV_HANDLE)object;
+     return ERROR_SUCCESS;
+ }
+@@ -539,7 +702,97 @@
+     if (flags) FIXME("flags %#lx not supported\n", flags);
+ 
+     if (!object) return NTE_INVALID_HANDLE;
++    if (object->type == SECRET) return NTE_INVALID_HANDLE;
++    if (!name || (!input && insize)) return NTE_INVALID_PARAMETER;
++    if (!wcscmp(name, NCRYPT_PROVIDER_HANDLE_PROPERTY)) return NTE_NOT_SUPPORTED;
++    if (object->type == KEY && object->key.algid == ECDH_P256)
++    {
++        if (!insize) return NTE_INVALID_PARAMETER;
++        if (flags & ~(NCRYPT_PERSIST_FLAG | NCRYPT_PERSIST_ONLY_FLAG | NCRYPT_SILENT_FLAG)) return NTE_BAD_FLAGS;
++        if (!wcscmp(name, NCRYPT_LENGTH_PROPERTY))
++        {
++            if (object->key.finalized) return NTE_BAD_KEY_STATE;
++            if (insize != sizeof(DWORD) || !input || *(DWORD *)input != 256) return NTE_INVALID_PARAMETER;
++        }
++        else if (!wcscmp(name, NCRYPT_EXPORT_POLICY_PROPERTY) || !wcscmp(name, NCRYPT_KEY_USAGE_PROPERTY))
++        {
++            if (insize != sizeof(DWORD) || !input) return NTE_INVALID_PARAMETER;
++            if (!wcscmp(name, NCRYPT_EXPORT_POLICY_PROPERTY) && (*(DWORD *)input & ~0x0f)) return NTE_INVALID_PARAMETER;
++            if (!wcscmp(name, NCRYPT_KEY_USAGE_PROPERTY) && (*(DWORD *)input & ~NCRYPT_ALLOW_ALL_USAGES)) return NTE_INVALID_PARAMETER;
++        }
++        else if (!wcscmp(name, NCRYPT_ALGORITHM_PROPERTY) || !wcscmp(name, NCRYPT_ALGORITHM_GROUP_PROPERTY) ||
++                 !wcscmp(name, BCRYPT_PUBLIC_KEY_LENGTH) || !wcscmp(name, NCRYPT_LENGTHS_PROPERTY) ||
++                 !wcscmp(name, NCRYPT_PROVIDER_HANDLE_PROPERTY) || !wcscmp(name, NCRYPT_KEY_TYPE_PROPERTY))
++            return NTE_NOT_SUPPORTED;
++    }
+     return set_object_property(object, name, input, insize);
++}
++
++SECURITY_STATUS WINAPI NCryptSecretAgreement(NCRYPT_KEY_HANDLE private_handle, NCRYPT_KEY_HANDLE public_handle,
++                                            NCRYPT_SECRET_HANDLE *ret_handle, DWORD flags)
++{
++    struct object *private_key = (struct object *)private_handle, *public_key = (struct object *)public_handle;
++    struct object *secret;
++    const struct object_property *usage;
++    NTSTATUS status;
++
++    TRACE("(%#Ix, %#Ix, %p, %#lx)\n", private_handle, public_handle, ret_handle, flags);
++    if (!private_key || !public_key || private_key->type != KEY || public_key->type != KEY) return NTE_INVALID_HANDLE;
++    if (!ret_handle) return NTE_INVALID_PARAMETER;
++    *ret_handle = 0;
++    if (flags & ~NCRYPT_SILENT_FLAG) return NTE_BAD_FLAGS;
++    if (private_key->key.algid != ECDH_P256 || public_key->key.algid != ECDH_P256) return NTE_NOT_SUPPORTED;
++    if (!private_key->key.finalized || !public_key->key.finalized || private_key->key.public_only) return NTE_BAD_KEY_STATE;
++    usage = get_object_property(private_key, NCRYPT_KEY_USAGE_PROPERTY);
++    if (!usage || !(*(DWORD *)usage->value & NCRYPT_ALLOW_KEY_AGREEMENT_FLAG)) return NTE_PERM;
++    if (!(secret = allocate_object(SECRET))) return NTE_NO_MEMORY;
++    status = BCryptSecretAgreement(private_key->key.bcrypt_key, public_key->key.bcrypt_key, &secret->secret, 0);
++    if (status) { free(secret); return map_ntstatus(status); }
++    *ret_handle = (NCRYPT_SECRET_HANDLE)secret;
++    return ERROR_SUCCESS;
++}
++
++SECURITY_STATUS WINAPI NCryptDeriveKey(NCRYPT_SECRET_HANDLE handle, const WCHAR *kdf, NCryptBufferDesc *params,
++                                     BYTE *output, DWORD output_size, DWORD *ret_len, DWORD flags)
++{
++    struct object *secret = (struct object *)handle;
++    NTSTATUS status;
++    ULONG required, i;
++    UCHAR derived[64];
++
++    TRACE("(%#Ix, %s, %p, %p, %lu, %p, %#lx)\n", handle, wine_dbgstr_w(kdf), params, output, output_size, ret_len, flags);
++    if (!secret || secret->type != SECRET) return NTE_INVALID_HANDLE;
++    if (!kdf || !ret_len) return NTE_INVALID_PARAMETER;
++    if (flags & ~(NCRYPT_SILENT_FLAG | KDF_USE_SECRET_AS_HMAC_KEY_FLAG)) return NTE_BAD_FLAGS;
++    if (wcscmp(kdf, BCRYPT_KDF_HASH) && wcscmp(kdf, BCRYPT_KDF_RAW_SECRET)) return NTE_NOT_SUPPORTED;
++    if (params)
++    {
++        if (params->ulVersion != BCRYPTBUFFER_VERSION || (params->cBuffers && !params->pBuffers)) return NTE_INVALID_PARAMETER;
++        if (params->cBuffers > 1) return NTE_NOT_SUPPORTED;
++        for (i = 0; i < params->cBuffers; i++)
++        {
++            NCryptBuffer *buffer = params->pBuffers + i;
++            const WCHAR *hash = buffer->pvBuffer;
++            if (wcscmp(kdf, BCRYPT_KDF_HASH) || buffer->BufferType != KDF_HASH_ALGORITHM) return NTE_NOT_SUPPORTED;
++            if (!hash || buffer->cbBuffer < sizeof(WCHAR) || buffer->cbBuffer % sizeof(WCHAR) ||
++                hash[buffer->cbBuffer / sizeof(WCHAR) - 1]) return NTE_INVALID_PARAMETER;
++            if (wcscmp(hash, BCRYPT_SHA1_ALGORITHM) && wcscmp(hash, BCRYPT_SHA256_ALGORITHM) &&
++                wcscmp(hash, BCRYPT_SHA384_ALGORITHM) && wcscmp(hash, BCRYPT_SHA512_ALGORITHM)) return NTE_NOT_SUPPORTED;
++        }
++    }
++    status = BCryptDeriveKey(secret->secret, kdf, (BCryptBufferDesc *)params, NULL, 0, &required, 0);
++    if (status) return map_ntstatus(status);
++    *ret_len = required;
++    if (!output) return ERROR_SUCCESS;
++    if (required > sizeof(derived)) return NTE_INTERNAL_ERROR;
++    status = BCryptDeriveKey(secret->secret, kdf, (BCryptBufferDesc *)params, derived, sizeof(derived), &required, 0);
++    if (!status)
++    {
++        *ret_len = min(output_size, required);
++        memcpy(output, derived, *ret_len);
++    }
++    SecureZeroMemory(derived, sizeof(derived));
++    return map_ntstatus(status);
+ }
+ 
+ SECURITY_STATUS WINAPI NCryptSignHash(NCRYPT_KEY_HANDLE handle, void *padding, BYTE *value, DWORD value_len,
+--- a/dlls/ncrypt/ncrypt_internal.h
++++ b/dlls/ncrypt/ncrypt_internal.h
+@@ -26,22 +26,28 @@
+     RSA,
+     DSA,
+     ECDSA,
++    ECDH_P256,
+ };
+ 
+ struct key
+ {
+     enum algid algid;
+     BCRYPT_KEY_HANDLE bcrypt_key;
++    NCRYPT_PROV_HANDLE provider;
++    BOOL finalized;
++    BOOL public_only;
+ };
+ 
+ struct storage_provider
+ {
++    BOOL ecdh_supported;
+ };
+ 
+ enum object_type
+ {
+     KEY,
+     STORAGE_PROVIDER,
++    SECRET,
+ };
+ 
+ struct object_property
+@@ -54,11 +60,13 @@
+ struct object
+ {
+     enum object_type type;
++    LONG refs;
+     DWORD num_properties;
+     struct object_property *properties;
+     union
+     {
+         struct key key;
+         struct storage_provider storage_provider;
++        BCRYPT_SECRET_HANDLE secret;
+     };
+ };
+--- a/dlls/ncrypt/ncrypt.spec
++++ b/dlls/ncrypt/ncrypt.spec
+@@ -64,7 +64,7 @@
+ @ stub NCryptCreateProtectionDescriptor
+ @ stdcall NCryptDecrypt(long ptr long ptr ptr long ptr long)
+ @ stdcall NCryptDeleteKey(long long)
+-@ stub NCryptDeriveKey
++@ stdcall NCryptDeriveKey(long wstr ptr ptr long ptr long)
+ @ stub NCryptDuplicateKeyProtectorHandle
+ @ stdcall NCryptEncrypt(long ptr long ptr ptr long ptr long)
+ @ stdcall NCryptEnumAlgorithms(long long ptr ptr long)
+@@ -88,7 +88,7 @@
+ @ stub NCryptProtectSecret
+ @ stub NCryptQueryProtectionDescriptorName
+ @ stub NCryptRegisterProtectionDescriptorName
+-@ stub NCryptSecretAgreement
++@ stdcall NCryptSecretAgreement(long long ptr long)
+ @ stub NCryptSetAuditingInterface
+ @ stdcall NCryptSetProperty(ptr wstr ptr long long)
+ @ stdcall NCryptSignHash(long ptr ptr long ptr long ptr long)
+--- a/include/ncrypt.h
++++ b/include/ncrypt.h
+@@ -80,6 +80,7 @@
+ typedef ULONG_PTR NCRYPT_SECRET_HANDLE;
+ 
+ #define NCRYPT_KEY_STORAGE_INTERFACE        0x00010001
++#define MS_KEY_STORAGE_PROVIDER L"Microsoft Software Key Storage Provider"
+ #define NCRYPT_SCHANNEL_INTERFACE           0x00010002
+ #define NCRYPT_SCHANNEL_SIGNATURE_INTERFACE 0x00010003
+ #define NCRYPT_KEY_PROTECTION_INTERFACE     0x00010004
+@@ -94,6 +95,10 @@
+ #define NCRYPT_ALLOW_DECRYPT_FLAG       0x00000001
+ #define NCRYPT_ALLOW_SIGNING_FLAG       0x00000002
+ #define NCRYPT_ALLOW_KEY_AGREEMENT_FLAG 0x00000004
++
++#define NCRYPT_PERSIST_ONLY_FLAG 0x40000000
++#define NCRYPT_PERSIST_FLAG      0x80000000
++#define NCRYPTBUFFER_ECC_CURVE_NAME 60
+ #define NCRYPT_ALLOW_KEY_IMPORT_FLAG    0x00000008
+ #define NCRYPT_ALLOW_ALL_USAGES         0x00ffffff
+ 
+--- a/include/bcrypt.h
++++ b/include/bcrypt.h
+@@ -435,6 +435,7 @@
+ } BCRYPT_KEY_DATA_BLOB_HEADER, *PBCRYPT_KEY_DATA_BLOB_HEADER;
+ 
+ #define KDF_HASH_ALGORITHM      0x00
++#define KDF_USE_SECRET_AS_HMAC_KEY_FLAG 0x00000001
+ #define KDF_SECRET_PREPEND      0x01
+ #define KDF_SECRET_APPEND       0x02
+ #define KDF_HMAC_KEY            0x03
+--- a/dlls/bcrypt/gnutls.c
++++ b/dlls/bcrypt/gnutls.c
+@@ -155,6 +155,8 @@
+                                             gnutls_datum_t *x, gnutls_datum_t *y);
+ static int (*pgnutls_privkey_import_ecc_raw)(gnutls_privkey_t, gnutls_ecc_curve_t, const gnutls_datum_t *,
+                                              const gnutls_datum_t *, const gnutls_datum_t *);
++static int (*pgnutls_privkey_verify_params)(gnutls_privkey_t);
++static int (*pgnutls_pubkey_verify_params)(gnutls_pubkey_t);
+ static int (*pgnutls_pubkey_verify_hash2)(gnutls_pubkey_t, gnutls_sign_algorithm_t, unsigned int,
+                                           const gnutls_datum_t *, const gnutls_datum_t *);
+ static int (*pgnutls_pubkey_encrypt_data)(gnutls_pubkey_t, unsigned int flags, const gnutls_datum_t *,
+@@ -340,6 +342,16 @@
+     return GNUTLS_E_UNKNOWN_PK_ALGORITHM;
+ }
+ 
++static int compat_gnutls_privkey_verify_params(gnutls_privkey_t key)
++{
++    return GNUTLS_E_UNKNOWN_PK_ALGORITHM;
++}
++
++static int compat_gnutls_pubkey_verify_params(gnutls_pubkey_t key)
++{
++    return GNUTLS_E_UNKNOWN_PK_ALGORITHM;
++}
++
+ static int compat_gnutls_privkey_export_dsa_raw(gnutls_privkey_t key, gnutls_datum_t *p, gnutls_datum_t *q,
+                                                 gnutls_datum_t *g, gnutls_datum_t *y, gnutls_datum_t *x)
+ {
+@@ -604,6 +616,7 @@
+     LOAD_FUNCPTR_OPT(gnutls_privkey_generate2)
+     LOAD_FUNCPTR_OPT(gnutls_privkey_import_dh_raw)
+     LOAD_FUNCPTR_OPT(gnutls_privkey_import_ecc_raw)
++    LOAD_FUNCPTR_OPT(gnutls_privkey_verify_params)
+     LOAD_FUNCPTR_OPT(gnutls_privkey_import_rsa_raw)
+     LOAD_FUNCPTR_OPT(gnutls_privkey_set_spki)
+     LOAD_FUNCPTR_OPT(gnutls_pubkey_encrypt_data)
+@@ -617,6 +630,7 @@
+     LOAD_FUNCPTR_OPT(gnutls_pubkey_import_rsa_raw)
+     LOAD_FUNCPTR_OPT(gnutls_pubkey_set_spki)
+     LOAD_FUNCPTR_OPT(gnutls_pubkey_verify_hash2)
++    LOAD_FUNCPTR_OPT(gnutls_pubkey_verify_params)
+     LOAD_FUNCPTR_OPT(gnutls_x509_spki_deinit)
+     LOAD_FUNCPTR_OPT(gnutls_x509_spki_init)
+     LOAD_FUNCPTR_OPT(gnutls_x509_spki_set_rsa_oaep_params)
+@@ -1809,6 +1823,12 @@
+         return STATUS_INTERNAL_ERROR;
+     }
+ 
++    if (key->alg_id == ALG_ID_ECDH_P256 && (ret = pgnutls_privkey_verify_params( handle )))
++    {
++        pgnutls_privkey_deinit( handle );
++        return ret == GNUTLS_E_UNKNOWN_PK_ALGORITHM ? STATUS_NOT_SUPPORTED : STATUS_INVALID_PARAMETER;
++    }
++
+     if (key_data(key)->a.privkey) pgnutls_privkey_deinit( key_data(key)->a.privkey );
+     key_data(key)->a.privkey = handle;
+     return STATUS_SUCCESS;
+@@ -2074,6 +2094,12 @@
+         pgnutls_perror( ret );
+         pgnutls_pubkey_deinit( handle );
+         return STATUS_INTERNAL_ERROR;
++    }
++
++    if (key->alg_id == ALG_ID_ECDH_P256 && (ret = pgnutls_pubkey_verify_params( handle )))
++    {
++        pgnutls_pubkey_deinit( handle );
++        return ret == GNUTLS_E_UNKNOWN_PK_ALGORITHM ? STATUS_NOT_SUPPORTED : STATUS_INVALID_PARAMETER;
+     }
+ 
+     if (key_data(key)->a.pubkey) pgnutls_pubkey_deinit( key_data(key)->a.pubkey );
