@@ -21,7 +21,7 @@ Start with the [project overview](../README.md) or the
 | [Display and Gateway startup](display-startup.md) | Current #7 findings and focused comparisons for the affected setup. |
 | [Gateway loader names](gateway-loader-case.md) | Preview.11's scoped Gateway startup correction and all four native controls. |
 | [Device-creation diagnostic](device-creation-diagnostic.md) | Own-code serial/parallel graphics-device comparisons and executable artifacts. |
-| [System memory](system-memory.md) | Audited #12 measurements, the corrected certificate/queue leads and optional aggregate sampling. |
+| [System memory](system-memory.md) | Audited #12 measurements, reported certificate-query/close counts, bounded native controls and optional aggregate sampling. |
 | [Direct2D lifetime correction](d2d-lifetime.md) | The Display memory fix and its validation. |
 | [Release readiness](release-readiness.md) | The unpublished 0.1.0 preparation and remaining issue work. |
 | [Release notes](release-notes.md) | Published changes and historical validation. |

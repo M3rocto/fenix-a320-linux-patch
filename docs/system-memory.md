@@ -7,6 +7,10 @@ The [23 October follow-up](https://github.com/marselnenaj/fenix-a320-linux-patch
 supplies four aggregate CSVs. The [subsequent correction](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/12#issuecomment-6367478956)
 withdraws the large OutputReport estimate and identifies accumulating signing-
 certificate data as the main new lead.
+The [24 October relay summary](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/12#issuecomment-6382991795)
+now reports repeated successful `CryptQueryObject` calls without corresponding
+store/message closes during the periodic phase. This is stronger evidence of
+caller-side handle retention than the earlier certificate-string census.
 We have independently recalculated the supplied counters; we have **not**
 independently reproduced the Fenix runtime behavior.
 
@@ -79,8 +83,9 @@ presence alone does not establish live allocations or leaked handles.
 The [next observation](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/12#issuecomment-6367877773)
 reports executable opens at ten/s beginning about 70 seconds after restart,
 near the onset of growth. At 30 MiB/min that would be approximately **51.2 KiB
-per open**, if each open maps to one leaking operation. The fanotify opening
-PID/TID and actual API/close counts were not supplied. File opens alone do not
+per open**, if each open maps to one leaking operation. At that point the
+fanotify opening PID/TID and actual API/close counts had not been supplied.
+File opens alone do not
 identify `CryptQueryObject`, a caller, or a release imbalance. The later
 certificate snapshots do not overlap the attached CSVs, so their attribution
 cannot be independently recalculated from those counters.
@@ -94,19 +99,77 @@ These windows are timed from the first new-PID sample, not a recorded process
 creation time.
 These startup allocations and drops do not independently establish identical
 onset timing or a constant 32–36 MiB/min in both runs. The fanotify observation
-is a useful separate reporter finding, not yet an attributed API trace.
+is a separate reporter finding; the later relay summary below supplies API
+counts for a different run.
 
 Microsoft's [CryptQueryObject contract](https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-cryptqueryobject)
 assigns the returned message and certificate-store handles to the caller.
 The matching Wine path duplicates the message for its message-backed store;
 both [CryptMsgClose](https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-cryptmsgclose)
 and [CertCloseStore](https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-certclosestore)
-matter. This contract does not show which API Fenix uses or whether it closes
-every handle/context. The pinned crypt32 includes our RFC3161 content patch;
+matter. The contract defines the caller's release obligations; the relay
+summary below reports the calls seen in the actual process. The pinned crypt32 includes our RFC3161 content patch;
 the pinned wintrust includes the PE indirect-data patch. Reviewing Wine main
 alone cannot rule out Wine, the overlay, or managed-wrapper behavior.
 The reporter's actual preview.9 loaded-module hashes have not been verified;
 the own-code comparison below uses the current pinned candidate.
+
+## 24 October: reported query/close imbalance in FenixSystem
+
+The reporter ran a **539.7-second** Wine crypt32/wintrust relay trace with a
+fresh Fenix 2.4.0.4720 System process, aircraft on the ground and parking brake
+set. Only aggregate call counts are supplied; we have not independently
+recounted the trace or reproduced this run. Steam had updated MSFS to build
+**26058316**. The reporter confirms the active `d2d1.dll` hash against
+preview.9's CachyOS 11 entry; that does not verify the loaded crypt32/wintrust
+hashes.
+
+| Calls entering from outside crypt32/wintrust | Reported count and timing |
+| --- | --- |
+| `CryptQueryObject` | **4,852**, all returning TRUE. There are 36 in the first ~8 seconds, then no calls until **+56.5 s**, followed by **10.0/s**. The periodic gap median is 100 ms, P5 99 ms and P95 101 ms. |
+| `CertCloseStore` | **40**, all by **+8.05 s**; none during the periodic phase. |
+| `CryptMsgClose` | **5**, all by **+1.09 s**; none during the periodic phase. |
+| `CertFreeCertificateContext` | **99**, with 95 in the first ten seconds. |
+| `WinVerifyTrust` | **2**, at **+0.46/+0.53 s**. |
+
+At least **4,799 periodic queries** passed non-NULL `phCertStore` and `phMsg`
+output pointers. **4,846 of 4,852** queries came from Wine thread **0b08**.
+The fanotify summary identifies wineserver as the reporting opener and counts
+50 opens of the executable path per five-second window. Its original event
+mask is no longer available. Wineserver attribution alone does not identify
+the higher-level calling function; the relay supplies the Wine calling thread.
+
+Anonymous RSS was sampled every five seconds. The reporter gives
+**5.6 MiB/min** before onset, a **618 → 578 MiB** downward step shortly after
+onset, then **30.2 MiB/min**. At ten calls/s the latter is **51.54 KiB per
+call**, a ratio of process growth to call rate, not a measured allocation size.
+The whole-run rate is only **8.99 calls/s** because it includes startup and
+the quiet interval; it must not replace the periodic rate in that comparison.
+
+This reported query/close imbalance strongly supports **unreleased
+signature-query outputs in the observed caller path** as the leading
+mechanism. Microsoft requires closing each returned non-NULL store/message
+handle when its use is finished. Non-NULL output pointers are addresses of
+output slots, not a count of valid handles: successful queries only return
+both handle types for applicable content types, including embedded signed
+PKCS#7. The aggregate summary does not provide returned handle values or a
+complete lifetime/ownership trace, so it does not establish an exact count of
+live handles, the responsible higher-level function or every byte of growth.
+Certificate-context frees do not substitute for closing the separate
+store/message outputs.
+
+The native control below retains about **38.5–39.1 KiB per pair** for a
+different public signed file. That is the same order of magnitude, not an
+exact calibration of the **51.54 KiB/call** process-growth ratio. The control
+requests no certificate contexts and runs much more briefly. Conversely,
+the new Fenix relay is evidence from the actual process rather than a claim
+that the native probe reproduces its managed wrapper.
+
+The reporter has sent these counts, the Wine/Linux setup and the stated
+limits to Fenix support. Windows behavior, the precise ownership failure and
+a production correction remain unverified. The earlier ~85 CA-name
+occurrences/s remain unexplained and are not used as handle counts. No new
+flight, relay trace, memory collection or dump upload is requested.
 
 ## Bounded own-code control
 
@@ -131,12 +194,14 @@ this fixture and query path; this does not test other trust-verification APIs.
 This short native control does not reproduce the large growth on the tested
 signature/query path. It does not reproduce Fenix 2's certificate, .NET
 Framework wrapper, other trust APIs, or long-running process, and does not
-establish Windows behavior. Existing aggregate API/close counts and the file-
-opening actor, if already retained, are the useful next evidence. No new
-flight, process-memory collection or dump upload is requested.
+establish Windows behavior. The subsequent reporter relay above now supplies
+actual-process query/close counts; it does not turn the native control into a
+Fenix reproducer. No new flight, process-memory collection or dump upload is
+requested.
 
-The reporter is submitting the certificate lead to Fenix support. Keep #12
-open: no System-memory fix, platform attribution or Fenix v3 qualification is
+The reporter has submitted the certificate lead to Fenix support. Keep #12
+open for a support response or a verified ownership correction: no
+System-memory fix, platform attribution or Fenix v3 qualification is
 claimed. The working Direct2D Display correction remains in place.
 
 ## Optional aggregate sampling

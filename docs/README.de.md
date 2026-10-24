@@ -114,7 +114,10 @@ Vollständige v3-Testflüge stehen aus; eine frühere Wine-Assertion beim Start 
 ungeklärt. [Issue #7](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/7)
 dokumentiert den Gateway-Fix und den Display-Workaround mit Safe Mode aus;
 [#12](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/12) das
-separate FenixSystem-Speicherwachstum.
+separate FenixSystem-Speicherwachstum. Eine neue Ablaufaufzeichnung des Melders
+deutet auf wiederholte Zertifikatsabfragen ohne passende Freigabe der Store-
+und Message-Handles. Eine Korrektur und das Verhalten unter Windows bleiben
+unbestätigt. [System-Speicherbefunde](system-memory.md).
 [Aktuelle Befunde und gezielte Diagnoseschritte](display-startup.md)
 
 GPU-fähige Overlays verwenden **GPU-Displays** und **Legacy-Readouts**.

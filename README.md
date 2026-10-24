@@ -109,7 +109,10 @@ Fenix v3 full-flight stability remains unvalidated, and an earlier Wine startup
 assertion is unexplained. [Issue #7](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/7)
 records the Gateway fix and the Display Safe Mode-off workaround;
 [#12](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/12) tracks
-separate FenixSystem memory growth. See the
+separate FenixSystem memory growth. A new reporter trace points to repeated
+certificate queries without matching store/message closes; a fix and Windows
+behavior remain unverified. [System-memory evidence](docs/system-memory.md).
+See the
 [current findings and focused diagnostics](docs/display-startup.md).
 
 GPU-capable overlays use **GPU displays** and **Legacy readouts**. An explicit

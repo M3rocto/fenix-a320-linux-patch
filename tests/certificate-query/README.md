@@ -86,8 +86,15 @@ These bounded native observations do not reproduce Fenix 2's signing chain,
 Fenix-side cause, Windows equivalence or production fix follows from them.
 Store-only, message-only and no-output queries use different internal cleanup
 branches. Certificate contexts obtained later by enumeration/find/duplication
-also have separate release obligations; this control requests none. The actual
-Fenix wrapper/API/output parameters have not been established.
+also have separate release obligations; this control requests none. A later
+[reporter relay summary](https://github.com/marselnenaj/fenix-a320-linux-patch/issues/12#issuecomment-6382991795)
+reports successful `CryptQueryObject` calls at ten/s with non-NULL store/message
+output pointers and no calls to close those outputs during the periodic
+phase. This supports a caller-side retention lead in that run, while the
+precise managed wrapper, returned values and ownership path remain unverified.
+Its ~51.5 KiB/call anonymous-process-growth ratio and this control's
+~38.5–39.1 KiB per retained pair use different signatures, time spans and
+memory measurements; their similar scale does not make them equivalent.
 The measured counters are retained in [overlay.csv](overlay.csv) and
 [matching-stock.csv](matching-stock.csv); the private-usage column is explicitly
 unavailable.
